@@ -49,6 +49,32 @@ try {
         check(proof_validate('metrics', json_encode($data), $now + 1800)['status'] === 'unavailable', 'approved ticket definition still expires');
     }
     $data['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION_V3;
+    // Ticket shapes: today's nine keys (rate means one business hour); nine plus the pair with a
+    // same-working-day rate; nine plus the pair with no rate. Bad values hide only the ticket.
+    $with = fn(array $extra) => (function () use ($data, $extra) { $copy = $data; foreach ($extra as $k => $v) $copy['metrics']['ticket_first_response'][$k] = $v; return $copy; })();
+    $ticket = fn(array $extra) => proof_validate('metrics', json_encode($with($extra)), $now);
+    $r = $ticket([]); check($r['status'] === 'available' && !array_key_exists('service_rate_basis', $r['metrics']['ticket_first_response']), "today's shape passes unchanged");
+    $r = $ticket(['service_rate_basis' => 'same_business_day', 'value_median_seconds' => 1800]);
+    check($r['status'] === 'available' && $r['metrics']['ticket_first_response']['service_rate_basis'] === 'same_business_day' && $r['metrics']['ticket_first_response']['value_median_seconds'] === 1800, 'same-day shape passes with its pair');
+    foreach ([PROOF_TICKET_DEFINITION_V2, PROOF_TICKET_DEFINITION_V3] as $definition) {
+        $r = $ticket(['definition_id' => $definition, 'service_rate_basis' => null, 'value_median_seconds' => 1800, 'service_rate_percent' => null]);
+        check($r['status'] === 'available' && $r['metrics']['ticket_first_response']['service_rate_percent'] === null, 'no-rate shape passes');
+    }
+    foreach ([['service_rate_percent' => null], ['service_rate_basis' => 'same_business_day', 'value_median_seconds' => 1800, 'service_rate_percent' => null],
+        ['service_rate_basis' => null, 'value_median_seconds' => 1800], ['service_rate_basis' => 'one_business_hour', 'value_median_seconds' => 1800],
+        ['service_rate_basis' => 'within_a_week', 'value_median_seconds' => 1800], ['service_rate_basis' => 'same_business_day', 'value_median_seconds' => null],
+        ['service_rate_basis' => 'same_business_day', 'value_median_seconds' => '1800'], ['service_rate_basis' => null, 'value_median_seconds' => -1, 'service_rate_percent' => null]] as $extra) {
+        $r = $ticket($extra);
+        check($r['status'] === 'partial' && $r['metrics']['ticket_first_response']['status'] === 'unavailable' && $r['metrics']['call_wait']['status'] === 'available', 'invalid ticket values hide only the ticket: ' . json_encode($extra));
+    }
+    foreach ([fn($d) => $with(['service_rate_basis' => 'same_business_day']), fn($d) => $with(['value_median_seconds' => 1800]),
+        fn($d) => $with(['service_rate_basis' => null, 'value_median_seconds' => 1800, 'service_rate_percent' => null, 'surprise' => 1]),
+        function ($d) { $d['metrics']['call_wait']['value_median_seconds'] = 10; return $d; },
+        function ($d) { $d['metrics']['call_wait']['service_rate_basis'] = null; $d['metrics']['call_wait']['value_median_seconds'] = 10; return $d; }] as $mutate) {
+        $threw = false; try { proof_validate('metrics', json_encode($mutate($data)), $now); } catch (Throwable) { $threw = true; } check($threw, 'malformed key set rejected as before');
+    }
+    $off = fixture(); $off['metrics']['ticket_first_response'] += ['service_rate_basis' => null, 'value_median_seconds' => null];
+    check(proof_validate('metrics', json_encode($off), $now)['status'] === 'partial', 'unavailable ticket may carry the pair as nulls');
     $data['metrics']['call_wait']['definition_id'] = 'future.definition'; $data['status'] = 'available'; $result = proof_validate('metrics', json_encode($data), $now);
     check($result['status'] === 'partial' && $result['metrics']['call_wait']['status'] === 'unavailable', 'tickets pass alone');
     check(proof_validate('metrics', json_encode(fixture()), $now + 1800)['status'] === 'unavailable', 'expired source');
@@ -87,6 +113,9 @@ try {
     $v3 = nightly_metrics(); $v3['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION_V3;
     $write('website-metrics.json', snapshot('website-metrics', $v3)); $body = $get('/api/website-metrics')[2];
     check($body['status'] === 'available' && $body['metrics']['ticket_first_response']['definition_id'] === PROOF_TICKET_DEFINITION_V3, 'v3 snapshot serves the ticket figure');
+    $none = $v3; $none['metrics']['ticket_first_response'] += ['service_rate_basis' => null, 'value_median_seconds' => 1800]; $none['metrics']['ticket_first_response']['service_rate_percent'] = null;
+    $write('website-metrics.json', snapshot('website-metrics', $none)); $body = $get('/api/website-metrics')[2];
+    check($body['status'] === 'available' && $body['metrics']['ticket_first_response']['service_rate_basis'] === null && $body['metrics']['ticket_first_response']['value_median_seconds'] === 1800, 'no-rate snapshot serves the pair unchanged');
     $v3['metrics']['ticket_first_response']['definition_id'] = 'superops.first_contact_reply_or_linked_call.unreviewed.v3';
     $write('website-metrics.json', snapshot('website-metrics', $v3)); $body = $get('/api/website-metrics')[2];
     check($body['status'] === 'partial' && $body['metrics']['ticket_first_response']['status'] === 'unavailable', 'unknown ticket definition in a snapshot is unavailable');

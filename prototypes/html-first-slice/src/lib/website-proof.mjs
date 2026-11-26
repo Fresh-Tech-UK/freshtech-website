@@ -8,25 +8,37 @@ export const TICKET_DEFINITION_V2 = 'superops.first_tech_reply.client_incidents.
 // deploy in either order. Remove v2 once the nightly feed carries v3.
 export const TICKET_DEFINITION_V3 = 'superops.first_contact_reply_or_linked_call.client_incidents.business_hours.28_complete_days.v3';
 const HOURS = 'counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays)';
-const EXCLUDED = 'Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.';
+const EXCLUDED = 'Automated notifications, billing and sales emails are excluded.';
 // Each reviewed ticket definition carries its own public wording, so a figure is
 // never described by another definition's text.
 export const TICKET_WORDING = {
   [TICKET_DEFINITION_V2]: {
-    compactTime: 'Average first reply to support emails, in business hours',
-    rate: 'Support emails answered within one business hour',
-    heading: 'Average first reply to support emails',
+    label: 'Average first reply to a support email, in business hours',
     method: `First reply covers support issues our clients raised by email or our portal: the time to the first written reply from a technician, ${HOURS}. ${EXCLUDED}`,
-    body: `Support issues our clients raised by email or our portal. Time to the first written reply from a technician, ${HOURS}. ${EXCLUDED}`,
   },
   [TICKET_DEFINITION_V3]: {
-    compactTime: 'Average first reply or call, in business hours',
-    rate: 'Support emails answered within one business hour',
-    heading: 'Average first reply or phone call on support emails',
+    label: 'Average first reply or call on a support email, in business hours',
     method: `First reply or call covers support issues our clients raised by email or our portal over the last 28 complete days: the time to our first reply or phone call to the client, ${HOURS}. A call counts once it is linked to the issue; automatic replies, missed calls and voicemails do not count. ${EXCLUDED}`,
-    body: `Support issues our clients raised by email or our portal over the last 28 complete days. Time to our first reply or phone call to the client, ${HOURS}. A call counts once it is linked to the issue; automatic replies, missed calls and voicemails do not count. ${EXCLUDED}`,
   },
 };
+// The ticket rate's meaning travels in `service_rate_basis`. A feed without the
+// pair is today's one-business-hour rate; a null basis (with a null rate) publishes none.
+export const RATE_BASIS = {
+  one_business_hour: {
+    label: 'Support emails answered within one business hour',
+    method: 'Unanswered issues count against the one-hour figure.',
+  },
+  same_business_day: {
+    label: 'Support emails answered the same working day',
+    method: 'Answered the same working day means an issue raised in business hours was answered by close of business (17:30 UK) that day, and one raised outside business hours by close of the next business day. Bank holidays are excluded.',
+  },
+};
+export const CALL_WORDING = {
+  time: 'Average wait before we answer a support call',
+  rate: 'Support calls answered by our team',
+  method: 'Average wait is measured from joining our support phone queue to one of our team answering, among answered calls only. The answer rate is answered calls out of every call to the support queue, including missed and abandoned calls. Answered means a member of our team picked up; calls that reached voicemail or our out-of-hours assistant are not counted as answered.',
+};
+export const METHOD_CLOSING = 'These figures are not a time to fix a problem or every customer’s experience.';
 const DEFINITIONS = { call_wait: [CALL_DEFINITION], ticket_first_response: Object.keys(TICKET_WORDING) };
 export const FEEDS = { metrics: '/api/website-metrics', feedback: '/api/website-feedback' };
 export const MAX_BYTES = 8192;
@@ -41,10 +53,15 @@ export function utc(value) {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 19) === value.slice(0, 19) ? parsed : NaN;
 }
-function metricShape(value, source) {
-  return exactKeys(value, metricFields) && value.source === source
-    && ['available', 'stale', 'unavailable'].includes(value.status);
+// The ticket metric may carry exactly one extra pair, service_rate_basis with
+// value_median_seconds, and only together. Calls stay at exactly the nine keys.
+// Any other key set fails the whole feed closed, as before.
+const TICKET_PAIR = ['service_rate_basis', 'value_median_seconds'];
+function metricShape(value, source, allowPair = false) {
+  return (exactKeys(value, metricFields) || (allowPair && exactKeys(value, [...metricFields, ...TICKET_PAIR])))
+    && value.source === source && ['available', 'stale', 'unavailable'].includes(value.status);
 }
+const validRate = rate => typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 100;
 const londonParts = value => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
@@ -59,21 +76,33 @@ export function parseMetrics(data, now = Date.now()) {
   if (!exactKeys(data, ['schema_version', 'status', 'metrics']) || data.schema_version !== 2
     || !['available', 'partial', 'unavailable'].includes(data.status)
     || !exactKeys(data.metrics, ['ticket_first_response', 'call_wait'])
-    || !metricShape(data.metrics.ticket_first_response, 'superops') || !metricShape(data.metrics.call_wait, 'yeastar')) return [];
+    || !metricShape(data.metrics.ticket_first_response, 'superops', true)
+    || !metricShape(data.metrics.call_wait, 'yeastar')) return [];
   const count = Object.values(data.metrics).filter(metric => metric.status === 'available').length;
   if (data.status !== (count === 2 ? 'available' : count === 1 ? 'partial' : 'unavailable')) return [];
   // Calls first, then tickets. Each is shown only under its exact reviewed definition.
   return ['call_wait', 'ticket_first_response'].flatMap(key => {
-    const metric = data.metrics[key];
+    // value_median_seconds is validated but not shown yet; it never leaves this function.
+    const { value_median_seconds: median, service_rate_basis: pairBasis, ...metric } = data.metrics[key];
+    let basis = null;
+    if (key === 'call_wait' || !Object.hasOwn(data.metrics[key], 'service_rate_basis')) {
+      // Calls, and today's ticket shape (no pair): the rate is required. For tickets it means one business hour.
+      if (!validRate(metric.service_rate_percent)) return [];
+      if (key === 'ticket_first_response') basis = 'one_business_hour';
+    } else {
+      // With the pair: a same-working-day rate, or no rate at all. Nothing else.
+      if (typeof median !== 'number' || !Number.isFinite(median) || median < 0) return [];
+      if (pairBasis === 'same_business_day' && validRate(metric.service_rate_percent)) basis = pairBasis;
+      else if (!(pairBasis === null && metric.service_rate_percent === null)) return [];
+    }
+    const rate = metric.service_rate_percent;
     if (metric.status !== 'available' || !DEFINITIONS[key].includes(metric.definition_id)
-      || typeof metric.value_seconds !== 'number' || !Number.isFinite(metric.value_seconds) || metric.value_seconds < 0
-      || typeof metric.service_rate_percent !== 'number' || !Number.isFinite(metric.service_rate_percent)
-      || metric.service_rate_percent < 0 || metric.service_rate_percent > 100) return [];
+      || typeof metric.value_seconds !== 'number' || !Number.isFinite(metric.value_seconds) || metric.value_seconds < 0) return [];
     const start = utc(metric.period_start), end = utc(metric.period_end);
     const observed = utc(metric.observed_at), expires = utc(metric.expires_at);
     if (!(start < end && end <= observed && observed <= now && now < expires && expires - observed <= 180000000)
       || !validCallPeriod(start, end)) return [];
-    return [{ ...metric, key, expiry: expires }];
+    return [{ ...metric, service_rate_percent: rate, rate_basis: basis, key, expiry: expires }];
   });
 }
 function text(value, max) {
@@ -104,8 +133,34 @@ export function formatTime(seconds) {
   const n = Math.ceil(seconds / (hours ? 360 : 6)) / 10;
   return `${n.toLocaleString('en-GB', { maximumFractionDigits: 1 })} ${hours ? (n === 1 ? 'hour' : 'hours') : (n === 1 ? 'minute' : 'minutes')}`;
 }
-// Ticket timing counts business hours only, so the unit says so.
-export const formatBusinessTime = seconds => formatTime(seconds).replace(/ (seconds?|minutes?|hours?)$/, ' business $1');
+// Ticket timing in friendly units: whole minutes below two hours, then hours to one
+// decimal; always rounded up, never flattered. It counts business hours only, so
+// every ticket label says "in business hours".
+export function formatTicketTime(seconds) {
+  if (seconds >= 60 && seconds < 7200) { const n = Math.ceil(seconds / 60); return `${n} ${n === 1 ? 'minute' : 'minutes'}`; }
+  return formatTime(seconds);
+}
+// The panel's figures in reading order: the call wait leads, then the call answer
+// rate, the ticket time and, when the feed publishes one with a reviewed basis,
+// the ticket rate. The panel shows these and nothing else.
+export function proofFigures(values) {
+  return values.flatMap(metric => metric.key === 'call_wait'
+    ? [{ id: 'call_time', key: metric.key, label: CALL_WORDING.time, value: formatTime(metric.value_seconds), kind: 'time', lead: true },
+      { id: 'call_rate', key: metric.key, label: CALL_WORDING.rate, value: formatRate(metric.service_rate_percent), kind: 'rate' }]
+    : [{ id: 'ticket_time', key: metric.key, label: TICKET_WORDING[metric.definition_id].label, value: formatTicketTime(metric.value_seconds), kind: 'time' },
+      ...(metric.rate_basis ? [{ id: 'ticket_rate', key: metric.key, label: RATE_BASIS[metric.rate_basis].label, value: formatRate(metric.service_rate_percent), kind: 'rate' }] : [])]);
+}
+// "How we measure these figures": only the paragraphs for what is on screen.
+export function proofMethod(values) {
+  return [...values.flatMap(metric => metric.key === 'call_wait' ? [CALL_WORDING.method]
+    : [TICKET_WORDING[metric.definition_id].method, ...(metric.rate_basis ? [RATE_BASIS[metric.rate_basis].method] : [])]), METHOD_CLOSING];
+}
+// One line when both figures cover the same days, one per figure otherwise.
+export function proofPeriods(values) {
+  const lines = values.map(metric => formatPeriod(metric));
+  if (new Set(lines).size <= 1) return [`Reporting period: ${lines[0]} (UK dates).`];
+  return values.map((metric, i) => `${metric.key === 'call_wait' ? 'Calls' : 'Emails'}: ${lines[i]} (UK dates).`);
+}
 export const formatRate = rate => `${(Math.floor(rate * 10) / 10).toLocaleString('en-GB', { maximumFractionDigits: 1 })}%`;
 export function formatPeriod(metric) {
   const format = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'long', year: 'numeric' });

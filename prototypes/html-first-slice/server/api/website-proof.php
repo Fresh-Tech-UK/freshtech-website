@@ -18,6 +18,11 @@ const PROOF_TICKET_DEFINITION_V2 = 'superops.first_tech_reply.client_incidents.b
 const PROOF_TICKET_DEFINITION_V3 = 'superops.first_contact_reply_or_linked_call.client_incidents.business_hours.28_complete_days.v3';
 const PROOF_TICKET_DEFINITIONS = [PROOF_TICKET_DEFINITION_V2, PROOF_TICKET_DEFINITION_V3];
 const PROOF_MAX_BYTES = 8192;
+// The ticket metric may carry exactly one extra pair, together or not at all:
+// service_rate_basis ("same_business_day" with a rate, or null with a null rate) and
+// value_median_seconds. Without the pair the rate means one business hour. Calls stay
+// at exactly the nine keys; any other key set rejects the feed, as before.
+const PROOF_TICKET_PAIR = ['service_rate_basis', 'value_median_seconds'];
 
 function proof_empty_metric(string $source): array {
     return ['status' => 'unavailable', 'source' => $source, 'value_seconds' => null,
@@ -78,7 +83,8 @@ function proof_validate(string $feed, string $raw, float $now): array {
         $fields = array_keys(proof_empty_metric('yeastar')); $count = 0;
         foreach (['ticket_first_response' => 'superops', 'call_wait' => 'yeastar'] as $key => $source) {
             $metric = $data->metrics->$key;
-            if (!proof_keys($metric, $fields) || $metric->source !== $source
+            $shape = proof_keys($metric, $fields) || ($key === 'ticket_first_response' && proof_keys($metric, array_merge($fields, PROOF_TICKET_PAIR)));
+            if (!$shape || $metric->source !== $source
                 || !in_array($metric->status, ['available', 'stale', 'unavailable'], true)) throw new RuntimeException('Invalid');
             if ($metric->status === 'available') $count++;
         }
@@ -87,9 +93,13 @@ function proof_validate(string $feed, string $raw, float $now): array {
         $passed = 0;
         foreach (['call_wait' => [PROOF_CALL_DEFINITION], 'ticket_first_response' => PROOF_TICKET_DEFINITIONS] as $key => $definitions) {
             $metric = $data->metrics->$key;
+            $rateValid = proof_number($metric->service_rate_percent) && $metric->service_rate_percent >= 0 && $metric->service_rate_percent <= 100;
+            if (!property_exists($metric, 'service_rate_basis')) { if (!$rateValid) continue; }
+            elseif (!proof_number($metric->value_median_seconds) || $metric->value_median_seconds < 0
+                || !(($metric->service_rate_basis === 'same_business_day' && $rateValid)
+                    || ($metric->service_rate_basis === null && $metric->service_rate_percent === null))) continue;
             if ($metric->status !== 'available' || !in_array($metric->definition_id, $definitions, true)
-                || !proof_number($metric->value_seconds) || $metric->value_seconds < 0
-                || !proof_number($metric->service_rate_percent) || $metric->service_rate_percent < 0 || $metric->service_rate_percent > 100) continue;
+                || !proof_number($metric->value_seconds) || $metric->value_seconds < 0) continue;
             $start = proof_utc($metric->period_start); $end = proof_utc($metric->period_end);
             $observed = proof_utc($metric->observed_at); $expires = proof_utc($metric->expires_at);
             if (!($start < $end && $end <= $observed && $observed <= $now && $now < $expires && $expires - $observed <= PROOF_METRIC_MAX_LIFETIME)) continue;
