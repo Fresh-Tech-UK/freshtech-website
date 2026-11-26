@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMetrics, parseFeedback, formatTime, formatBusinessTime, formatRate, TICKET_DEFINITION, formatPeriod, formatMonth, retainFeedback, readFeed, utc } from './website-proof.mjs';
+import { parseMetrics, parseFeedback, formatTime, formatBusinessTime, formatRate, TICKET_DEFINITION_V2, TICKET_DEFINITION_V3, TICKET_WORDING, formatPeriod, formatMonth, retainFeedback, readFeed, utc } from './website-proof.mjs';
 import { metricsFixture, feedbackFixture, FIXTURE_NOW, emptyMetric } from '../../scripts/fixtures/website-proof.mjs';
 test('reviewed support queue mean and rate travel together, with exclusive UK dates', () => {
   const result = parseMetrics(metricsFixture(), FIXTURE_NOW);
@@ -15,13 +15,47 @@ test('available ticket stays hidden until its definition is reviewed', () => {
 });
 test('approved ticket first reply travels with its rate, after calls, and alone', () => {
   const data = metricsFixture(); data.status = 'available';
-  data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', definition_id: TICKET_DEFINITION, value_seconds: 3357.1, service_rate_percent: 66.4 };
+  data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', definition_id: TICKET_DEFINITION_V2, value_seconds: 3357.1, service_rate_percent: 66.4 };
   const result = parseMetrics(data, FIXTURE_NOW);
   assert.deepEqual(result.map(value => value.key), ['call_wait', 'ticket_first_response']);
   assert.equal(formatBusinessTime(result[1].value_seconds), '56 business minutes'); assert.equal(formatRate(result[1].service_rate_percent), '66.4%');
   data.metrics.call_wait.definition_id = 'future.v2';
   assert.deepEqual(parseMetrics(data, FIXTURE_NOW).map(value => value.key), ['ticket_first_response']);
   for (const [input, expected] of [[30, '30 business seconds'], [60, '1 business minute'], [5400, '1.5 business hours']]) assert.equal(formatBusinessTime(input), expected);
+});
+test('v2 and v3 ticket definitions both pass during the changeover; retired and unknown ids hide', () => {
+  const data = metricsFixture(); data.status = 'available';
+  data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3357.1, service_rate_percent: 66.4 };
+  for (const id of [TICKET_DEFINITION_V2, TICKET_DEFINITION_V3]) {
+    data.metrics.ticket_first_response.definition_id = id;
+    const result = parseMetrics(data, FIXTURE_NOW);
+    assert.deepEqual(result.map(value => value.key), ['call_wait', 'ticket_first_response']);
+    assert.equal(result[1].definition_id, id); assert.ok(TICKET_WORDING[id]);
+    assert.deepEqual(parseMetrics(data, Date.parse('2026-09-22T12:29:00Z')), [], 'expired figure hides under either definition');
+  }
+  for (const id of ['superops.first_tech_reply.email_portal.business_hours.28_complete_days.v1', `${TICKET_DEFINITION_V3}.draft`, TICKET_DEFINITION_V3.toUpperCase(), null]) {
+    data.metrics.ticket_first_response.definition_id = id;
+    assert.deepEqual(parseMetrics(data, FIXTURE_NOW).map(value => value.key), ['call_wait']);
+  }
+  data.metrics.ticket_first_response.definition_id = TICKET_DEFINITION_V3; data.metrics.ticket_first_response.status = 'stale'; data.status = 'partial';
+  assert.deepEqual(parseMetrics(data, FIXTURE_NOW).map(value => value.key), ['call_wait'], 'stale v3 hides');
+});
+test('each ticket definition carries its own truthful wording', () => {
+  const v2 = TICKET_WORDING[TICKET_DEFINITION_V2], v3 = TICKET_WORDING[TICKET_DEFINITION_V3];
+  assert.equal(v2.heading, 'Average first reply to support emails');
+  assert.equal(v2.compactTime, 'Average first reply to support emails, in business hours');
+  assert.match(v2.body, /^Support issues our clients raised by email or our portal\. Time to the first written reply from a technician, counted in business hours/);
+  assert.equal(v3.heading, 'Average first reply or phone call on support emails');
+  assert.equal(v3.compactTime, 'Average first reply or call, in business hours');
+  for (const text of [v3.body, v3.method]) {
+    assert.match(text, /our first reply or phone call to the client, counted in business hours \(Mon–Fri 09:00–17:30 UK, excluding bank holidays\)/);
+    assert.match(text, /last 28 complete days/); assert.match(text, /A call counts once it is linked to the issue/);
+    assert.match(text, /automatic replies, missed calls and voicemails do not count/);
+    assert.doesNotMatch(text, /written reply/);
+  }
+  for (const wording of [v2, v3]) for (const text of Object.values(wording)) {
+    assert.doesNotMatch(text, /—|resolution|resolved|guarantee/i);
+  }
 });
 for (const value of [null, -1, Infinity, '12', true]) test(`invalid timing ${String(value)} hides`, () => {
   const data = metricsFixture(); data.metrics.call_wait.value_seconds = value; assert.deepEqual(parseMetrics(data, FIXTURE_NOW), []);

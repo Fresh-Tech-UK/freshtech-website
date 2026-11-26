@@ -1,4 +1,4 @@
-import { FEEDS, formatBusinessTime, formatMonth, formatPeriod, formatRate, formatTime, itemKey, parseFeedback, parseMetrics, readFeed, retainFeedback } from '../lib/website-proof.mjs';
+import { FEEDS, TICKET_WORDING, formatBusinessTime, formatMonth, formatPeriod, formatRate, formatTime, itemKey, parseFeedback, parseMetrics, readFeed, retainFeedback } from '../lib/website-proof.mjs';
 import { googleRatingLabel, parseGoogleRating } from '../lib/google-rating.mjs';
 
 // The projection is never stored in a cookie, localStorage or a service worker.
@@ -40,7 +40,9 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
       }
       if (fallback) fallback.hidden = true;
       if (feed === 'metrics') {
-        const metric = values[0], keys = values.map(value => value.key).join(' ');
+        // The ticket wording follows its definition, so a definition change rebuilds the card.
+        const metric = values[0], keys = values.map(value => `${value.key}:${value.definition_id}`).join(' ');
+        const ticket = values.find(value => value.key === 'ticket_first_response'), wording = ticket && TICKET_WORDING[ticket.definition_id];
         // Keep the disclosure node, its open state and keyboard focus on refresh
         // while the same figures are showing.
         if (cards.dataset.proofCompact === 'true' && cards.firstElementChild && cards.dataset.proofKeys === keys) {
@@ -56,7 +58,7 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
         if (cards.dataset.proofCompact === 'true') {
           // Calls, then tickets. Both share the same 28 complete UK days.
           const labels = { call_wait: ['Average queue wait for answered support calls', 'Eligible support queue calls answered by a person'],
-            ticket_first_response: ['Average first reply to support emails, in business hours', 'Support emails answered within one business hour'] };
+            ticket_first_response: wording && [wording.compactTime, wording.rate] };
           const card = element('article');
           for (const value of values) {
             const pair = element('dl', undefined, 'proof-pair');
@@ -69,7 +71,7 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
           }
           const details = element('details', undefined, 'proof-method');
           details.append(element('summary', 'How we measure these figures'), element('p', 'Average wait is measured from joining the support queue to a person answering, among answered calls only. The answer rate includes missed and abandoned calls as unanswered.'));
-          if (values.some(value => value.key === 'ticket_first_response')) details.append(element('p', 'First reply covers support issues our clients raised by email or our portal: the time to the first written reply from a technician, counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays). Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.'));
+          if (wording) details.append(element('p', wording.method));
           details.append(element('p', 'These figures are not a time to fix a problem or every customer’s experience.'));
           card.append(element('p', `Reporting period: ${formatPeriod(metric)} (UK dates).`, 'proof-period'), element('p', 'Past results, not a promise.', 'proof-note'), details);
           cards.dataset.proofKeys = keys;
@@ -79,9 +81,9 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
           if (metric.key === 'call_wait') card.append(element('h3', 'Average queue wait for answered support calls'), element('p', formatTime(metric.value_seconds), 'proof-time'),
             element('p', `${formatRate(metric.service_rate_percent)} of eligible support queue calls answered by a person`, 'proof-rate'),
             element('p', 'From joining the support queue to a human answer, among answered calls. Missed and abandoned calls remain in the answer-rate denominator.'));
-          else card.append(element('h3', 'Average first reply to support emails'), element('p', formatBusinessTime(metric.value_seconds), 'proof-time'),
+          else card.append(element('h3', wording.heading), element('p', formatBusinessTime(metric.value_seconds), 'proof-time'),
             element('p', `${formatRate(metric.service_rate_percent)} answered within one business hour`, 'proof-rate'),
-            element('p', 'Support issues our clients raised by email or our portal. Time to the first written reply from a technician, counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays). Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.'));
+            element('p', wording.body));
           card.append(element('p', `Reporting period: ${formatPeriod(metric)} (UK dates).`, 'proof-period'));
           return card;
         }));

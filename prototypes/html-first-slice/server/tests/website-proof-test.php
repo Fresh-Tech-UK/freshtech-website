@@ -16,7 +16,7 @@ function nightly_metrics(): array {
     $data = fixture(); $data['status'] = 'available';
     $data['metrics']['call_wait']['observed_at'] = '2026-09-22T01:30:00Z'; $data['metrics']['call_wait']['expires_at'] = '2026-09-24T01:30:00Z';
     $data['metrics']['ticket_first_response'] = $data['metrics']['call_wait'];
-    $data['metrics']['ticket_first_response']['source'] = 'superops'; $data['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION;
+    $data['metrics']['ticket_first_response']['source'] = 'superops'; $data['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION_V2;
     return $data;
 }
 function nightly_feedback(): array { $data = feedback(); $data['expires_at'] = '2026-09-24T01:30:00Z'; return $data; }
@@ -38,8 +38,17 @@ try {
     foreach (['future.definition', null] as $definition) { $data = fixture(); $data['metrics']['call_wait']['definition_id'] = $definition; check(proof_validate('metrics', json_encode($data), $now)['status'] === 'unavailable', 'unknown definition'); }
     $data = fixture(); $data['status'] = 'available'; $data['metrics']['ticket_first_response'] = $data['metrics']['call_wait']; $data['metrics']['ticket_first_response']['source'] = 'superops';
     check(proof_validate('metrics', json_encode($data), $now)['metrics']['ticket_first_response']['status'] === 'unavailable', 'unreviewed ticket definition stays hidden');
-    $data['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION; $result = proof_validate('metrics', json_encode($data), $now);
-    check($result['status'] === 'available' && $result['metrics']['ticket_first_response']['definition_id'] === PROOF_TICKET_DEFINITION, 'approved ticket definition passes');
+    foreach (['superops.first_tech_reply.client_incidents.business_hours.28_complete_days.v1', 'superops.first_contact_reply_or_linked_call.client_incidents.business_hours.28_complete_days.v4', 'SUPEROPS.FIRST_TECH_REPLY.CLIENT_INCIDENTS.BUSINESS_HOURS.28_COMPLETE_DAYS.V2', null] as $definition) {
+        $data['metrics']['ticket_first_response']['definition_id'] = $definition;
+        check(proof_validate('metrics', json_encode($data), $now)['metrics']['ticket_first_response']['status'] === 'unavailable', 'retired or unknown ticket definition stays hidden');
+    }
+    // v2 and v3 both pass during the changeover, carrying their own id to the page.
+    foreach ([PROOF_TICKET_DEFINITION_V2, PROOF_TICKET_DEFINITION_V3] as $definition) {
+        $data['metrics']['ticket_first_response']['definition_id'] = $definition; $result = proof_validate('metrics', json_encode($data), $now);
+        check($result['status'] === 'available' && $result['metrics']['ticket_first_response']['definition_id'] === $definition, 'approved ticket definition passes');
+        check(proof_validate('metrics', json_encode($data), $now + 1800)['status'] === 'unavailable', 'approved ticket definition still expires');
+    }
+    $data['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION_V3;
     $data['metrics']['call_wait']['definition_id'] = 'future.definition'; $data['status'] = 'available'; $result = proof_validate('metrics', json_encode($data), $now);
     check($result['status'] === 'partial' && $result['metrics']['call_wait']['status'] === 'unavailable', 'tickets pass alone');
     check(proof_validate('metrics', json_encode(fixture()), $now + 1800)['status'] === 'unavailable', 'expired source');
@@ -74,6 +83,15 @@ try {
     [$status, $head, $raw] = proof_http('HEAD', '/api/website-metrics', $directory, $clock);
     check($status === 200 && $raw === '' && $head['Content-Length'] === $headers['Content-Length'], 'HEAD has GET length without body');
     check($get('/api/website-feedback')[2]['items'][0]['first_name'] === 'TestAlex', 'feedback snapshot');
+    // A nightly push on the v3 definition serves the same way, then v2 again (either deploy order).
+    $v3 = nightly_metrics(); $v3['metrics']['ticket_first_response']['definition_id'] = PROOF_TICKET_DEFINITION_V3;
+    $write('website-metrics.json', snapshot('website-metrics', $v3)); $body = $get('/api/website-metrics')[2];
+    check($body['status'] === 'available' && $body['metrics']['ticket_first_response']['definition_id'] === PROOF_TICKET_DEFINITION_V3, 'v3 snapshot serves the ticket figure');
+    $v3['metrics']['ticket_first_response']['definition_id'] = 'superops.first_contact_reply_or_linked_call.unreviewed.v3';
+    $write('website-metrics.json', snapshot('website-metrics', $v3)); $body = $get('/api/website-metrics')[2];
+    check($body['status'] === 'partial' && $body['metrics']['ticket_first_response']['status'] === 'unavailable', 'unknown ticket definition in a snapshot is unavailable');
+    $write('website-metrics.json', snapshot('website-metrics', nightly_metrics()));
+    check($get('/api/website-metrics')[2]['metrics']['ticket_first_response']['definition_id'] === PROOF_TICKET_DEFINITION_V2, 'v2 snapshot still serves');
     check($get('/api/website-metrics', null)[2]['status'] === 'unavailable', 'no folder, no figures');
     $now = strtotime('2026-09-24T01:30:00Z');
     check($get('/api/website-metrics')[2]['status'] === 'unavailable' && $get('/api/website-feedback')[2]['status'] === 'unavailable', 'expired snapshot hidden');

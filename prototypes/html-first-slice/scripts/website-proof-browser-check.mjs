@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { metricsFixture, feedbackFixture, unavailableFeedback, FIXTURE_NOW, emptyMetric } from './fixtures/website-proof.mjs';
+import { TICKET_DEFINITION_V2, TICKET_DEFINITION_V3, TICKET_WORDING } from '../src/lib/website-proof.mjs';
 import { BLOCKMARK_STUB, isBlockmarkBadge } from './lib/blockmark-stub.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -55,33 +56,42 @@ async function open({ route = '/', width = 390, height = 900, javaScriptEnabled 
   return { context, page, state, errors, requests };
 }
 try {
-  // Approved ticket first reply (8 Oct 2026): full proof sections show it after calls;
-  // the compact homepage panel keeps the call pair only.
-  const withTicket = () => {
+  // Approved ticket figure: v2 (first written reply, 9 Oct 2026) and v3 (first reply or
+  // linked phone call, 26 Nov 2026) both render during the changeover, each in its own words.
+  // Full proof sections show it after calls; the compact homepage panel shows both pairs.
+  const withTicket = (definition_id = TICKET_DEFINITION_V2) => {
     const data = metricsFixture(); data.status = 'available';
-    data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3357.1, service_rate_percent: 66.4,
-      definition_id: 'superops.first_tech_reply.client_incidents.business_hours.28_complete_days.v2' };
+    data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3357.1, service_rate_percent: 66.4, definition_id };
     return data;
   };
-  for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 390, 900, 1024, 1440]) {
-    const { context, page, errors } = await open({ route, width, metrics: withTicket() });
+  for (const definition of [TICKET_DEFINITION_V2, TICKET_DEFINITION_V3]) for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 390, 900, 1024, 1440]) {
+    const wording = TICKET_WORDING[definition], version = definition === TICKET_DEFINITION_V3 ? 'v3' : 'v2';
+    const { context, page, errors, state } = await open({ route, width, metrics: withTicket(definition) });
     await page.locator('[data-proof-metrics]').first().waitFor({ state: 'visible' });
     const text = (await page.locator('[data-website-proof]').allInnerTexts()).join('\n');
     if (route === '/') {
-      check(text.includes('25 seconds') && text.includes('Average first reply to support emails, in business hours') && text.includes('56 minutes')
-        && text.includes('Support emails answered within one business hour'), `${route} ${width}: compact panel shows calls then tickets`);
+      check(text.includes('25 seconds') && text.includes(wording.compactTime) && text.includes('56 minutes')
+        && text.includes('Support emails answered within one business hour'), `${route} ${width} ${version}: compact panel shows calls then tickets`);
       check(await page.locator('[data-proof-metrics]').first().evaluate(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).minBlockSize) + 0.5),
-        `${route} ${width}: both figures fit the reserved height (no layout shift)`);
+        `${route} ${width} ${version}: both figures fit the reserved height (no layout shift)`);
+      await page.locator('.proof-method summary').first().click();
+      check((await page.locator('.proof-method').first().innerText()).includes(wording.method), `${route} ${width} ${version}: method text follows the definition`);
+      // A changed definition on the next minute's refresh replaces the wording, never keeps the old text.
+      const next = definition === TICKET_DEFINITION_V2 ? TICKET_DEFINITION_V3 : TICKET_DEFINITION_V2;
+      state.metrics = withTicket(next); await page.clock.runFor(60000); await settle(page);
+      const refreshed = await page.locator('[data-proof-metrics]').first().innerText();
+      check(refreshed.includes(TICKET_WORDING[next].compactTime) && !refreshed.includes(wording.compactTime), `${route} ${width} ${version}: definition change on refresh swaps the wording`);
     } else {
-      check(text.includes('Average first reply to support emails') && text.includes('56 business minutes'), `${route} ${width}: ticket timing in business minutes`);
+      check(text.includes(wording.heading) && text.includes(wording.body) && text.includes('56 business minutes'), `${route} ${width} ${version}: ticket wording and timing in business minutes`);
       check(text.includes('66.4% answered within one business hour'), `${route} ${width}: ticket companion rate`);
       check(text.indexOf('Average queue wait') < text.indexOf('Average first reply'), `${route} ${width}: calls before tickets`);
       check(await page.locator('[data-proof-metric-cards] article').count() === 2, `${route} ${width}: two metric cards`);
     }
     check(!/resolution time|resolved in/i.test(text.replace(/not a guarantee, a resolution time/i, '')), `${route} ${width}: never called resolution time`);
+    check(version === 'v2' ? !/reply or (phone )?call|linked to the issue/.test(text) : !/written reply/.test(text), `${route} ${width} ${version}: no other definition's wording`);
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${route} ${width}: ticket card causes no horizontal overflow`);
     check(errors.length === 0, `${route} ${width}: ticket render has no errors`);
-    if (route === '/pricing') { const file = resolve(evidence, `ticket-proof-pricing-${width}.png`); await page.locator('[data-proof-metrics]').first().screenshot({ path: file }); screenshots.push(file); }
+    if (route === '/pricing') { const file = resolve(evidence, `ticket-proof-pricing-${version}-${width}.png`); await page.locator('[data-proof-metrics]').first().screenshot({ path: file }); screenshots.push(file); }
     await context.close();
   }
   for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 1440]) {

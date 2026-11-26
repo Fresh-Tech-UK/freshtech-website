@@ -1,9 +1,33 @@
 // Public projections only. A new definition needs a label/semantics review here
 // and in server/api/website-proof.php before it can be displayed.
 export const CALL_DEFINITION = 'yeastar.inbound_human_queue.28_complete_days.v1';
-// v2 approved by Sam on 9 October 2026.
-export const TICKET_DEFINITION = 'superops.first_tech_reply.client_incidents.business_hours.28_complete_days.v2';
-const DEFINITIONS = { call_wait: CALL_DEFINITION, ticket_first_response: TICKET_DEFINITION };
+// v2 approved by Sam on 9 October 2026: first written reply only.
+export const TICKET_DEFINITION_V2 = 'superops.first_tech_reply.client_incidents.business_hours.28_complete_days.v2';
+// v3 decided by Sam on 26 November 2026: first written reply or linked phone call.
+// Both are accepted during the changeover so the reporting system and the site can
+// deploy in either order. Remove v2 once the nightly feed carries v3.
+export const TICKET_DEFINITION_V3 = 'superops.first_contact_reply_or_linked_call.client_incidents.business_hours.28_complete_days.v3';
+const HOURS = 'counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays)';
+const EXCLUDED = 'Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.';
+// Each reviewed ticket definition carries its own public wording, so a figure is
+// never described by another definition's text.
+export const TICKET_WORDING = {
+  [TICKET_DEFINITION_V2]: {
+    compactTime: 'Average first reply to support emails, in business hours',
+    rate: 'Support emails answered within one business hour',
+    heading: 'Average first reply to support emails',
+    method: `First reply covers support issues our clients raised by email or our portal: the time to the first written reply from a technician, ${HOURS}. ${EXCLUDED}`,
+    body: `Support issues our clients raised by email or our portal. Time to the first written reply from a technician, ${HOURS}. ${EXCLUDED}`,
+  },
+  [TICKET_DEFINITION_V3]: {
+    compactTime: 'Average first reply or call, in business hours',
+    rate: 'Support emails answered within one business hour',
+    heading: 'Average first reply or phone call on support emails',
+    method: `First reply or call covers support issues our clients raised by email or our portal over the last 28 complete days: the time to our first reply or phone call to the client, ${HOURS}. A call counts once it is linked to the issue; automatic replies, missed calls and voicemails do not count. ${EXCLUDED}`,
+    body: `Support issues our clients raised by email or our portal over the last 28 complete days. Time to our first reply or phone call to the client, ${HOURS}. A call counts once it is linked to the issue; automatic replies, missed calls and voicemails do not count. ${EXCLUDED}`,
+  },
+};
+const DEFINITIONS = { call_wait: [CALL_DEFINITION], ticket_first_response: Object.keys(TICKET_WORDING) };
 export const FEEDS = { metrics: '/api/website-metrics', feedback: '/api/website-feedback' };
 export const MAX_BYTES = 8192;
 const metricFields = ['status', 'source', 'value_seconds', 'service_rate_percent', 'definition_id', 'observed_at', 'expires_at', 'period_start', 'period_end'];
@@ -41,7 +65,7 @@ export function parseMetrics(data, now = Date.now()) {
   // Calls first, then tickets. Each is shown only under its exact reviewed definition.
   return ['call_wait', 'ticket_first_response'].flatMap(key => {
     const metric = data.metrics[key];
-    if (metric.status !== 'available' || metric.definition_id !== DEFINITIONS[key]
+    if (metric.status !== 'available' || !DEFINITIONS[key].includes(metric.definition_id)
       || typeof metric.value_seconds !== 'number' || !Number.isFinite(metric.value_seconds) || metric.value_seconds < 0
       || typeof metric.service_rate_percent !== 'number' || !Number.isFinite(metric.service_rate_percent)
       || metric.service_rate_percent < 0 || metric.service_rate_percent > 100) return [];
