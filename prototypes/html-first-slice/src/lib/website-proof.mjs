@@ -16,27 +16,25 @@ export const TICKET_WORDING = {
     response: 'first reply',
     averageLabel: 'Average first reply to a support email, in business hours',
     typicalLabel: 'Typical first reply to a support email, in business hours',
-    sameDayLabel: 'Support emails that got a first reply the same working day',
     counts: 'The time shown is from the issue arriving to the first written reply from a technician.',
   },
   [TICKET_DEFINITION_V3]: {
     response: 'first reply or call',
     averageLabel: 'Average first reply or call on a support email, in business hours',
     typicalLabel: 'Typical first reply or call on a support email, in business hours',
-    sameDayLabel: 'Support emails that got a first reply or call the same working day',
     counts: 'The time shown is from the issue arriving to our first reply or phone call to the client. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not.',
   },
 };
 // The ticket rate's meaning travels in `service_rate_basis`. A feed without the
 // pair is today's one-business-hour rate; a null basis (with a null rate) publishes none.
+// Decided 27 November 2026: a same-working-day rate is never shown. Replying the same
+// day is the least a client expects, so it proves nothing; the typical time leads
+// instead. The feed may still send it during the changeover: it is validated as before
+// and then dropped, leaving three figures.
 export const RATE_BASIS = {
   one_business_hour: {
     label: () => 'Support emails answered within one business hour',
     method: () => 'Unanswered issues count against the one-hour figure.',
-  },
-  same_business_day: {
-    label: wording => wording.sameDayLabel,
-    method: wording => `An issue raised during business hours counts if it got a ${wording.response} by 5:30pm that working day; one raised outside business hours counts if it got one by 5:30pm on the next working day. Unanswered issues count against this figure.`,
   },
 };
 export const CALL_WORDING = {
@@ -108,8 +106,9 @@ export function parseMetrics(data, now = Date.now()) {
       if (key === 'ticket_first_response') basis = 'one_business_hour';
     } else {
       // With the pair: a same-working-day rate, or no rate at all. Nothing else.
+      // Either way no ticket rate is shown (see RATE_BASIS).
       if (typeof median !== 'number' || !Number.isFinite(median) || median < 0) return [];
-      if (pairBasis === 'same_business_day' && validRate(metric.service_rate_percent)) basis = pairBasis;
+      if (pairBasis === 'same_business_day' && validRate(metric.service_rate_percent)) metric.service_rate_percent = null;
       else if (!(pairBasis === null && metric.service_rate_percent === null)) return [];
     }
     const rate = metric.service_rate_percent;
