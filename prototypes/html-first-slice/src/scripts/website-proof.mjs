@@ -1,4 +1,4 @@
-import { FEEDS, formatBusinessTime, formatMonth, formatPeriod, formatRate, formatTime, itemKey, parseFeedback, parseMetrics, readFeed, retainFeedback } from '../lib/website-proof.mjs';
+import { FEEDS, formatMonth, itemKey, parseFeedback, parseMetrics, proofFigures, proofMethod, proofPeriods, readFeed, retainFeedback } from '../lib/website-proof.mjs';
 import { googleRatingLabel, parseGoogleRating } from '../lib/google-rating.mjs';
 
 // The projection is never stored in a cookie, localStorage or a service worker.
@@ -18,6 +18,12 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     return node;
+  };
+  // "25 seconds" renders as a large number and a smaller unit, so the headline
+  // figure stays on one line at phone widths. The text content is unchanged.
+  const setValue = (node, value) => {
+    const [, number, unit] = /^(\S+) (.+)$/.exec(value) ?? [, value, ''];
+    node.replaceChildren(element('span', number, 'proof-num'), ...(unit ? [' ', element('span', unit, 'proof-unit')] : []));
   };
   function paint(feed) {
     const state = states[feed];
@@ -40,51 +46,36 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
       }
       if (fallback) fallback.hidden = true;
       if (feed === 'metrics') {
-        const metric = values[0], keys = values.map(value => value.key).join(' ');
+        // One layout for the homepage panel and the full sections: the call wait
+        // leads, then the call answer rate, the ticket time and any ticket rate.
+        const figures = proofFigures(values), periods = proofPeriods(values), method = proofMethod(values, { closing: cards.dataset.proofCompact === 'true' });
+        const signature = JSON.stringify([figures.map(figure => [figure.id, figure.label]), method, periods.length]);
         // Keep the disclosure node, its open state and keyboard focus on refresh
-        // while the same figures are showing.
-        if (cards.dataset.proofCompact === 'true' && cards.firstElementChild && cards.dataset.proofKeys === keys) {
-          for (const value of values) {
-            const pair = cards.querySelector(`[data-proof-metric="${value.key}"]`);
-            pair.querySelector('.proof-time').textContent = formatTime(value.value_seconds);
-            pair.querySelector('.proof-rate').textContent = formatRate(value.service_rate_percent);
-          }
-          cards.querySelector('.proof-period').textContent = `Reporting period: ${formatPeriod(metric)} (UK dates).`;
+        // while the same figures, labels and definitions are showing.
+        if (cards.dataset.proofSignature === signature && cards.firstElementChild) {
+          for (const figure of figures) setValue(cards.querySelector(`[data-proof-figure="${figure.id}"] dd`), figure.value);
+          cards.querySelectorAll('.proof-period').forEach((line, i) => { line.textContent = periods[i]; });
           section.hidden = false;
           continue;
         }
-        if (cards.dataset.proofCompact === 'true') {
-          // Calls, then tickets. Both share the same 28 complete UK days.
-          const labels = { call_wait: ['Average queue wait for answered support calls', 'Eligible support queue calls answered by a person'],
-            ticket_first_response: ['Average first reply to support emails, in business hours', 'Support emails answered within one business hour'] };
-          const card = element('article');
-          for (const value of values) {
-            const pair = element('dl', undefined, 'proof-pair');
-            pair.dataset.proofMetric = value.key;
-            const time = element('div'), rate = element('div');
-            time.append(element('dt', labels[value.key][0]), element('dd', formatTime(value.value_seconds), 'proof-time'));
-            rate.append(element('dt', labels[value.key][1]), element('dd', formatRate(value.service_rate_percent), 'proof-rate'));
-            pair.append(time, rate);
-            card.append(pair);
-          }
-          const details = element('details', undefined, 'proof-method');
-          details.append(element('summary', 'How we measure these figures'), element('p', 'Average wait is measured from joining the support queue to a person answering, among answered calls only. The answer rate includes missed and abandoned calls as unanswered.'));
-          if (values.some(value => value.key === 'ticket_first_response')) details.append(element('p', 'First reply covers support issues our clients raised by email or our portal: the time to the first written reply from a technician, counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays). Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.'));
-          details.append(element('p', 'These figures are not a time to fix a problem or every customer’s experience.'));
-          card.append(element('p', `Reporting period: ${formatPeriod(metric)} (UK dates).`, 'proof-period'), element('p', 'Past results, not a promise.', 'proof-note'), details);
-          cards.dataset.proofKeys = keys;
-          cards.replaceChildren(card);
-        } else cards.replaceChildren(...values.map(metric => {
-          const card = element('article');
-          if (metric.key === 'call_wait') card.append(element('h3', 'Average queue wait for answered support calls'), element('p', formatTime(metric.value_seconds), 'proof-time'),
-            element('p', `${formatRate(metric.service_rate_percent)} of eligible support queue calls answered by a person`, 'proof-rate'),
-            element('p', 'From joining the support queue to a human answer, among answered calls. Missed and abandoned calls remain in the answer-rate denominator.'));
-          else card.append(element('h3', 'Average first reply to support emails'), element('p', formatBusinessTime(metric.value_seconds), 'proof-time'),
-            element('p', `${formatRate(metric.service_rate_percent)} answered within one business hour`, 'proof-rate'),
-            element('p', 'Support issues our clients raised by email or our portal. Time to the first written reply from a technician, counted in business hours (Mon–Fri 09:00–17:30 UK, excluding bank holidays). Unanswered issues count against the one-hour figure. Automated notifications, billing and sales emails are excluded.'));
-          card.append(element('p', `Reporting period: ${formatPeriod(metric)} (UK dates).`, 'proof-period'));
-          return card;
-        }));
+        const card = element('article');
+        const list = element('dl', undefined, 'proof-figures');
+        list.dataset.count = String(figures.length);
+        for (const figure of figures) {
+          const item = element('div', undefined, figure.lead ? 'proof-figure proof-lead' : 'proof-figure');
+          item.dataset.proofFigure = figure.id; item.dataset.proofMetric = figure.key;
+          const value = element('dd', undefined, figure.kind === 'time' ? 'proof-time' : 'proof-rate');
+          setValue(value, figure.value);
+          item.append(element('dt', figure.label), value);
+          list.append(item);
+        }
+        card.append(list, ...periods.map(line => element('p', line, 'proof-period')));
+        if (cards.dataset.proofCompact === 'true') card.append(element('p', 'Past results, not a promise.', 'proof-note'));
+        const details = element('details', undefined, 'proof-method');
+        details.append(element('summary', 'How we measure these figures'), ...method.map(text => element('p', text)));
+        card.append(details);
+        cards.dataset.proofSignature = signature;
+        cards.replaceChildren(card);
       } else {
         const retained = new Set(state.values.map(itemKey));
         for (const card of [...cards.children]) if (!retained.has(card.dataset.proofKey)) card.remove();

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { metricsFixture, feedbackFixture, unavailableFeedback, FIXTURE_NOW, emptyMetric } from './fixtures/website-proof.mjs';
+import { CALL_WORDING, RATE_BASIS, TICKET_DEFINITION_V2, TICKET_DEFINITION_V3, TICKET_WORDING, parseMetrics, proofMethod } from '../src/lib/website-proof.mjs';
 import { BLOCKMARK_STUB, isBlockmarkBadge } from './lib/blockmark-stub.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -55,33 +56,70 @@ async function open({ route = '/', width = 390, height = 900, javaScriptEnabled 
   return { context, page, state, errors, requests };
 }
 try {
-  // Approved ticket first reply (8 Oct 2026): full proof sections show it after calls;
-  // the compact homepage panel keeps the call pair only.
-  const withTicket = () => {
+  // The panel leads with the call wait, then the call answer rate, the ticket time and the
+  // ticket rate when the feed publishes one. v2 (first written reply) and v3 (first reply or
+  // linked phone call) both render during the changeover, each in its own words. Today's
+  // feed has no service_rate_basis: it means one business hour. The pair (basis, median)
+  // brings a same-working-day rate or, with a null basis and rate, three figures.
+  const withTicket = (definition_id = TICKET_DEFINITION_V2, extra = {}) => {
     const data = metricsFixture(); data.status = 'available';
-    data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3357.1, service_rate_percent: 66.4,
-      definition_id: 'superops.first_tech_reply.client_incidents.business_hours.28_complete_days.v2' };
+    data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3957.1, service_rate_percent: 66.4, definition_id, ...extra };
     return data;
   };
-  for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 390, 900, 1024, 1440]) {
-    const { context, page, errors } = await open({ route, width, metrics: withTicket() });
+  const ticketCases = [
+    { name: 'v2-four', definition: TICKET_DEFINITION_V2, extra: {}, basis: 'one_business_hour' },
+    { name: 'v3-four', definition: TICKET_DEFINITION_V3, extra: {}, basis: 'one_business_hour' },
+    { name: 'v3-sameday', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
+    { name: 'v2-sameday', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
+    { name: 'v2-three', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
+    { name: 'v3-three', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
+  ];
+  const figureLayout = locator => locator.evaluate(list => {
+    const box = list.getBoundingClientRect(), items = [...list.children].map(el => ({ id: el.dataset.proofFigure, label: el.querySelector('dt').textContent,
+      value: el.querySelector('dd').textContent, size: parseFloat(getComputedStyle(el.querySelector('dd .proof-num')).fontSize), rect: el.getBoundingClientRect() }));
+    const rows = Object.values(items.reduce((acc, item) => { (acc[Math.round(item.rect.top)] ??= []).push(item.rect); return acc; }, {}));
+    // No empty cell: every row reaches both edges of the grid.
+    const filled = rows.every(row => Math.abs(Math.min(...row.map(r => r.left)) - box.left) < 2 && Math.abs(Math.max(...row.map(r => r.right)) - box.right) < 2);
+    return { items: items.map(({ rect, ...item }) => item), filled, rows: rows.length };
+  });
+  for (const ticketCase of ticketCases) for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 390, 900, 1024, 1440]) {
+    const { name, definition, extra, basis } = ticketCase, label = `${route} ${width} ${name}`;
+    const { context, page, errors, state } = await open({ route, width, metrics: withTicket(definition, extra) });
     await page.locator('[data-proof-metrics]').first().waitFor({ state: 'visible' });
     const text = (await page.locator('[data-website-proof]').allInnerTexts()).join('\n');
-    if (route === '/') {
-      check(text.includes('25 seconds') && text.includes('Average first reply to support emails, in business hours') && text.includes('56 minutes')
-        && text.includes('Support emails answered within one business hour'), `${route} ${width}: compact panel shows calls then tickets`);
-      check(await page.locator('[data-proof-metrics]').first().evaluate(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).minBlockSize) + 0.5),
-        `${route} ${width}: both figures fit the reserved height (no layout shift)`);
-    } else {
-      check(text.includes('Average first reply to support emails') && text.includes('56 business minutes'), `${route} ${width}: ticket timing in business minutes`);
-      check(text.includes('66.4% answered within one business hour'), `${route} ${width}: ticket companion rate`);
-      check(text.indexOf('Average queue wait') < text.indexOf('Average first reply'), `${route} ${width}: calls before tickets`);
-      check(await page.locator('[data-proof-metric-cards] article').count() === 2, `${route} ${width}: two metric cards`);
+    const layout = await figureLayout(page.locator('.proof-figures').first());
+    // With a median the typical time (26 minutes) is the headline; without, today's average (66 minutes).
+    const wording = TICKET_WORDING[definition], typical = 'value_median_seconds' in extra;
+    const expected = [['call_time', CALL_WORDING.time, '25 seconds'], ['call_rate', CALL_WORDING.rate, '93.7%'],
+      ['ticket_time', typical ? wording.typicalLabel : wording.averageLabel, typical ? '26 minutes' : '66 minutes'],
+      ...(basis ? [['ticket_rate', RATE_BASIS[basis].label(wording), '66.4%']] : [])];
+    check(JSON.stringify(layout.items.map(item => [item.id, item.label, item.value])) === JSON.stringify(expected), `${label}: figures, labels and values in order (${JSON.stringify(layout.items.map(item => item.label))})`);
+    check(layout.items.slice(1).every(item => item.size < layout.items[0].size), `${label}: the call wait is the largest figure`);
+    check(layout.filled, `${label}: ${expected.length} figures leave no empty cell (${layout.rows} rows)`);
+    if (route === '/') check(await page.locator('[data-proof-metrics]').first().evaluate(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).minBlockSize) + 0.5),
+      `${label}: figures fit the reserved height (no layout shift)`);
+    await page.locator('.proof-method summary').first().click();
+    const method = await page.locator('.proof-method').first().innerText();
+    check(proofMethod(parseMetrics(withTicket(definition, extra), FIXTURE_NOW), { closing: route === '/' }).every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
+    const metricsText = await page.locator('[data-proof-metrics]').first().innerText();
+    check((metricsText.match(/every customer.s experience/g) ?? []).length === 1, `${label}: exactly one "every customer's experience" statement`);
+    check(Object.entries(RATE_BASIS).every(([key, rate]) => key === basis || !method.includes(rate.method(wording))), `${label}: no other basis's method`);
+    check(typical ? !/\baverage first|The average covers/i.test(method + text) : !/typical/i.test(method + text), `${label}: a median is never called an average`);
+    check((await page.locator('.proof-period').first().innerText()).includes('25 August 2026 to 21 September 2026'), `${label}: reporting period kept`);
+    check(!/resolution time|resolved in|eligible|by a person/i.test(text.replace(/not a guarantee, a resolution time/i, '')), `${label}: never called resolution time; no queue jargon in labels`);
+    check(definition === TICKET_DEFINITION_V2 ? !/reply or (phone )?call|linked to the issue/.test(method + text) : !/written reply/.test(method + text), `${label}: no other definition's wording`);
+    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${label}: no horizontal overflow`);
+    if (route === '/' && (name === 'v2-four' || name === 'v3-four')) {
+      // A changed definition on the next minute's refresh replaces the wording, never keeps the old text.
+      const next = definition === TICKET_DEFINITION_V2 ? TICKET_DEFINITION_V3 : TICKET_DEFINITION_V2;
+      state.metrics = withTicket(next); await page.clock.runFor(60000); await settle(page);
+      const refreshed = await page.locator('[data-proof-metrics]').first().innerText();
+      check(refreshed.includes(TICKET_WORDING[next].averageLabel) && !refreshed.includes(TICKET_WORDING[definition].averageLabel), `${label}: definition change on refresh swaps the wording`);
+      state.metrics = withTicket(next, { service_rate_basis: null, value_median_seconds: 1800, service_rate_percent: null }); await page.clock.runFor(60000); await settle(page);
+      check(await page.locator('.proof-figures').first().evaluate(el => el.dataset.count === '3' && !el.querySelector('[data-proof-figure="ticket_rate"]')), `${label}: rate withdrawn on refresh leaves three figures`);
     }
-    check(!/resolution time|resolved in/i.test(text.replace(/not a guarantee, a resolution time/i, '')), `${route} ${width}: never called resolution time`);
-    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${route} ${width}: ticket card causes no horizontal overflow`);
-    check(errors.length === 0, `${route} ${width}: ticket render has no errors`);
-    if (route === '/pricing') { const file = resolve(evidence, `ticket-proof-pricing-${width}.png`); await page.locator('[data-proof-metrics]').first().screenshot({ path: file }); screenshots.push(file); }
+    check(errors.length === 0, `${label}: ticket render has no errors ${errors.join('; ')}`);
+    if (route === '/pricing') { const file = resolve(evidence, `ticket-proof-pricing-${name}-${width}.png`); await page.locator('[data-proof-metrics]').first().screenshot({ path: file }); screenshots.push(file); }
     await context.close();
   }
   for (const route of ['/', '/pricing', '/why-trust-us', '/service-standards']) for (const width of [320, 1440]) {
@@ -178,7 +216,7 @@ try {
     check(geometry['.proof-time'].bottom < 844 && geometry['.proof-rate'].bottom < 844, `${width}: both support values appear within a phone-height first screen`);
     check(geometry['.home-reviews'].top === geometry['.home-hero'].bottom, `${width}: client testimony immediately follows the hero`);
     const banner = await page.locator('[data-cookie-banner]').boundingBox();
-    if (width === 390) check(banner && (await page.locator('.proof-pair').boundingBox()).y + (await page.locator('.proof-pair').boundingBox()).height < banner.y, '390x844: first-visit cookie notice leaves both support values and qualifiers visible');
+    if (width === 390) { const fig = await page.locator('.proof-figures').boundingBox(); check(banner && fig.y + fig.height < banner.y, `390x844: first-visit cookie notice leaves both support values and qualifiers visible (${JSON.stringify([fig, banner])})`); }
     const summary = page.locator('.proof-method summary');
     await summary.focus(); await page.keyboard.press('Enter');
     check(await page.locator('.proof-method').getAttribute('open') !== null, `${width}: metric definition opens with keyboard`);

@@ -8,6 +8,21 @@
 .website-proof .proof-note, .website-proof .proof-period { font-size: .9375rem; }
 .website-proof .proof-rate { font-weight: 700; }
 .proof-feedback-cards { display: grid; gap: 1rem; }
+/* Figures: the call wait leads (first and largest), then the call answer rate, the
+   ticket time and any ticket rate. Two columns; with three figures the lead takes
+   the whole first row so no cell sits empty. Wide full sections use one row. */
+.website-proof .proof-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 1.25rem; margin: 0; }
+.website-proof .proof-figure { min-width: 0; display: flex; flex-direction: column; margin: 0; }
+.website-proof .proof-figure dt { margin: 4px 0 0; font: 500 .9375rem/1.4 'Archivo', sans-serif; text-transform: none; letter-spacing: normal; }
+.website-proof .proof-figure dd { order: -1; margin: 0; font: 800 clamp(1.5rem, 3vw, 2rem)/1.15 'Archivo', sans-serif; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.website-proof .proof-figure .proof-unit { font-size: .6em; font-weight: 700; }
+.website-proof .proof-figure.proof-lead dd { font-size: clamp(2.25rem, 5vw, 2.75rem); }
+.website-proof .proof-figures[data-count="1"] > *, .website-proof .proof-figures[data-count="3"] > :first-child { grid-column: 1 / -1; }
+@media (min-width: 900px) {
+  .website-proof:not(.website-proof-compact) .proof-figures[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .website-proof:not(.website-proof-compact) .proof-figures[data-count="3"] > :first-child { grid-column: auto; }
+  .website-proof:not(.website-proof-compact) .proof-figures[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .website-proof [data-proof-metric-cards]:not([data-proof-compact]) { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); }
 .website-proof blockquote { margin: 0; padding: 1rem 0; border-top: 1px solid #79818b; overflow-wrap: anywhere; }
 .website-proof blockquote p { margin-top: 0; white-space: pre-wrap; }
@@ -22,22 +37,20 @@
 .website-proof-compact > .proof-fallback { display: flex; flex-direction: column; justify-content: center; }
 .website-proof-compact .proof-fallback p { margin: 0 0 .5rem; }
 .homepage .website-proof-compact h2 { margin: 0 0 12px; font: 700 .9375rem/1.4 'Home Archivo', sans-serif; letter-spacing: normal; text-transform: none; }
-.website-proof-compact .proof-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0; }
-.website-proof-compact .proof-pair > div { min-width: 0; display: flex; flex-direction: column; }
-.website-proof-compact dt { margin: 4px 0 0; font: 500 .875rem/1.4 'Home Archivo', sans-serif; text-transform: none; letter-spacing: normal; }
-.website-proof-compact dd { order: -1; }
-.website-proof-compact .proof-time, .website-proof-compact .proof-rate { margin: 0; color: #162334; font: 800 clamp(1.5rem, 4vw, 2rem)/1.15 'Home Archivo', sans-serif; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.website-proof-compact .proof-figure dt { font: 500 .875rem/1.4 'Home Archivo', sans-serif; }
+.website-proof-compact .proof-figure dd { color: #162334; font: 800 clamp(1.5rem, 4vw, 2rem)/1.15 'Home Archivo', sans-serif; }
+.website-proof-compact .proof-figure.proof-lead dd { font-size: clamp(2.25rem, 7vw, 2.75rem); }
+.website-proof-compact .proof-figures { gap: 12px 16px; }
 .website-proof-compact .proof-period, .website-proof-compact .proof-note { margin: 9px 0 0; font-size: .8125rem; line-height: 1.4; }
 .proof-method { margin-top: 4px; }
 .proof-method summary { padding: 9px 0; min-height: 36px; color: #184b85; font-size: .8125rem; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: .2em; }
 .proof-method summary:focus-visible { outline: 3px solid #162334; outline-offset: 3px; }
 .proof-method p { font-size: .9375rem; }
-/* Reserve the loaded height of BOTH figures (calls and tickets, measured 9 Oct
-   2026) at every column width, so neither loading nor a second figure moves the
+/* Reserve the loaded height of all four figures (calls and tickets, re-measured
+   26 Nov 2026 for the calls-first layout) at every column width, so neither loading nor a second figure moves the
    page. Keep the space flexible for enlarged text and an expanded explanation. */
 @media (min-width: 900px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 23.5rem; } }
-@media (min-width: 1024px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 21rem; } }
-@media (min-width: 1440px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 20rem; } }
-@media (max-width: 389px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 27rem; } }
+@media (min-width: 1024px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 22rem; } }
+@media (min-width: 1440px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 20.5rem; } }
+@media (max-width: 389px) { .website-proof-compact > section, .website-proof-compact > .proof-fallback { min-block-size: 28rem; } }
 @media (prefers-reduced-motion: reduce) { .website-proof *, .website-proof *::before, .website-proof *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
-.website-proof-compact .proof-pair + .proof-pair { margin-top: 12px; }
