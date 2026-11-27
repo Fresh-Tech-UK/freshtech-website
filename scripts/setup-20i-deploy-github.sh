@@ -1,23 +1,41 @@
 #!/usr/bin/env bash
 # One-off setup for .github/workflows/deploy-20i.yml, so main deploys from
 # GitHub and publishing no longer depends on the Mac being awake. Run it once
-# from a computer with the GitHub CLI signed in (brew install gh; gh auth login):
-#   bash scripts/setup-20i-deploy-github.sh <ssh-host> <ssh-user> [port] [remote-root]
+# from a computer with the GitHub CLI signed in as an admin of the repository
+# (macOS: brew install gh; Windows: winget install GitHub.cli, then use Git Bash;
+# gh auth login):
+#   bash scripts/setup-20i-deploy-github.sh [<ssh-host> <ssh-user> [port] [remote-root]]
 # Values come from My20i > Manage Hosting > fresh-tech.uk > SSH Access.
 # remote-root is the public_html path as seen after SFTP login (usually public_html).
+# With no arguments, on a Mac already set up by setup-20i-deploy-mac.sh, the
+# values are read from ~/.config/freshtech-deploy/config.json.
 #
 # Creates a dedicated ed25519 deploy key just for GitHub (separate from the
 # Mac's key, so either can be revoked alone), pins the server's host key, stores
 # everything as secrets on the GitHub "production" environment (usable from
 # main only), then deletes the private key locally. It prints only the PUBLIC
-# key, which you add in My20i > SSH Access. To revoke: remove that key in My20i.
+# key, which you add in My20i > SSH Access. Re-running replaces the key: add
+# the new PUBLIC key in My20i and remove the old "github-actions-deploy" one.
+# To revoke: remove that key in My20i.
 set -euo pipefail
-host="${1:?usage: setup-20i-deploy-github.sh <ssh-host> <ssh-user> [port] [remote-root]}"
-user="${2:?usage: setup-20i-deploy-github.sh <ssh-host> <ssh-user> [port] [remote-root]}"
+repo="Fresh-Tech-UK/freshtech-website"
+usage="usage: setup-20i-deploy-github.sh [<ssh-host> <ssh-user> [port] [remote-root]]"
+mac_config="${FRESHTECH_DEPLOY_CONFIG:-$HOME/.config/freshtech-deploy/config.json}"
+if [ "$#" -eq 0 ] && [ -f "$mac_config" ]; then
+  from_config() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]]' "$mac_config" "$1"; }
+  set -- "$(from_config host)" "$(from_config user)" "$(from_config port)" "$(from_config root)"
+  echo "Using the 20i connection details from $mac_config."
+fi
+host="${1:?$usage}"
+user="${2:?$usage}"
 port="${3:-22}"; root="${4:-public_html}"
-repo="mrapoc/freshtech-website"
 case "$root" in ''|.|./) echo "remote-root must name public_html, not the login directory." >&2; exit 1 ;; esac
-command -v gh >/dev/null || { echo "The GitHub CLI is needed (brew install gh, then gh auth login)." >&2; exit 1; }
+command -v gh >/dev/null || { echo "The GitHub CLI is needed (install gh, then gh auth login)." >&2; exit 1; }
+# The secrets must land on the repository's real home: an old name that GitHub
+# only redirects, or a repository this login cannot administer, stops here
+# before any key is made.
+[ "$(gh api "repos/$repo" --jq 'select(.permissions.admin) | .full_name' 2>/dev/null)" = "$repo" ] \
+  || { echo "$repo was not found, or this GitHub login is not an admin of it. Nothing was changed." >&2; exit 1; }
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 
 ssh-keygen -q -t ed25519 -N '' -C "github-actions-deploy@${repo}" -f "$work/key"

@@ -36,6 +36,31 @@ npm run dev
 is built. [ARCHITECTURE.md](ARCHITECTURE.md) explains how the pieces fit together.
 [AGENTS.md](AGENTS.md) holds the content and working rules.
 
+## Updating the website
+
+Anyone on the Fresh Tech team with write access can publish a change. Nothing is uploaded
+by hand, and no hosting login is needed.
+
+1. Make the change on a branch, never on `main`. Most pages come from the content files in
+   `data/` and `content/`; [AGENTS.md](AGENTS.md) has the content rules and the steps for a
+   blog post. A small text fix can be made in the GitHub web editor, which offers to create
+   the branch and pull request for you.
+2. Open a pull request into `main`. Two checks start by themselves: "Workspace standards"
+   (under a minute) and "Static site quality" (about 20 minutes, every page in a real browser).
+3. When both are green, and the pull request has the approval the repository rules ask for,
+   merge it. Merging is publishing: "Deploy to 20i" builds the merged commit,
+   backs up the files it replaces, uploads, checks the live site and restores the backup if
+   that check fails. The change is live a few minutes after merging.
+4. Open the live page and look at it. A red "Deploy to 20i" run means the change is not live:
+   read the failed step in the Actions tab, and do not upload to 20i by hand.
+
+To undo a change, revert its pull request on GitHub and merge the revert. "Deploy to 20i"
+can also be run from the Actions tab with an earlier commit on `main`.
+
+The 20i login used by the deploy belongs to GitHub's `production` environment, which only
+`main` can use; nobody needs a copy. Setting it up or replacing it is an admin job:
+`scripts/setup-20i-deploy-github.sh`.
+
 ## Copyright
 
 Copyright Fresh Tech. All rights reserved. The source is published for
