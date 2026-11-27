@@ -141,6 +141,10 @@
         [
           "Don't users hate having to ask for admin rights?",
           "They would, so we automate it. We allow the specific app (e.g. Zoom) to update, without giving the user full admin power. They get the prompt-free experience, you keep the security."
+        ],
+        [
+          "Do you offer a password manager?",
+          "Yes, as an optional extra. We supply and manage Keeper Enterprise, the password manager we use ourselves. Teams can share logins without passing passwords around, keep MFA codes for accounts that only allow one login, audit weak and reused passwords and hand over cleanly when someone leaves. See [how a business password manager works](/technology/password-manager)."
         ]
       ]
     },
