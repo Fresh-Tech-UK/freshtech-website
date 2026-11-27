@@ -45,7 +45,7 @@ export const CALL_WORDING = {
   method: 'Average wait is measured from joining our support phone queue to one of our team answering, among answered calls only. The answer rate is answered calls out of every call to the support queue, including missed and abandoned calls. Answered means a member of our team picked up; calls that reached voicemail or our out-of-hours assistant are not counted as answered.',
 };
 export const TICKET_SCOPE = `Email figures cover support issues our clients raised by email or our web form, counted ${HOURS}.`;
-export const TICKET_EXCLUDED = 'Our own internal tickets and automated system notices (for example, a website reporting its own plugin updates) are not counted, because nobody is waiting on a reply. Billing and sales emails are not counted either.';
+export const TICKET_EXCLUDED = 'The email figures cover reported problems, where something is not working. Requests for something new, such as setting up a new starter or new equipment, are planned work and are not included. Our own internal tickets and automated system notices (for example, a website reporting its own plugin updates) are not counted, because nobody is waiting on a reply. Billing and sales emails are not counted either.';
 // Sam, 27 Nov 2026: say plainly that we work by urgency and impact, not arrival order.
 export const METHOD_PRIORITY = 'We work on requests in order of urgency and impact, not simply the order they arrive. Something stopping a whole team from working is picked up ahead of a routine request, so a routine request can wait a little longer.';
 export const METHOD_PERIOD = 'Each figure covers the last 28 complete days, shown as the reporting period above.';

@@ -101,6 +101,7 @@ try {
     await page.locator('.proof-method summary').first().click();
     const method = await page.locator('.proof-method').first().innerText();
     check(proofMethod(parseMetrics(withTicket(definition, extra), FIXTURE_NOW), { closing: route === '/' }).every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
+    check(method.includes('Requests for something new, such as setting up a new starter or new equipment, are planned work and are not included.'), `${label}: says service requests are not in the email figures`);
     const metricsText = await page.locator('[data-proof-metrics]').first().innerText();
     check((metricsText.match(/every customer.s experience/g) ?? []).length === 1, `${label}: exactly one "every customer's experience" statement`);
     check(Object.entries(RATE_BASIS).every(([key, rate]) => key === basis || !method.includes(rate.method(wording))), `${label}: no other basis's method`);
