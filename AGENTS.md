@@ -41,8 +41,10 @@ get a green check. A passed build is not a Google score or a production deployme
 Use the public proof integration and update workflow, kept privately at
 `~/Context/FreshTech/Website/internal-docs/docs/seo/public-website-proof.md`, for this feature. Updating an existing site must preserve its live email handler,
 private configuration and logs; the initial DNS cutover runbook is historical.
-Releases deploy automatically from GitHub Actions once merged to `main`
+The repository is `Fresh-Tech-UK/freshtech-website`. Releases deploy automatically from
+GitHub Actions once merged to `main`
 (`.github/workflows/deploy-20i.yml`; one-off setup in `scripts/setup-20i-deploy-github.sh`).
+The team's route for any change is in the README, "Updating the website".
 The Mac deploy (`scripts/deploy-20i-local.mjs`) remains a manual fallback only; keep its
 schedule off so the two never race. Never upload to 20i by hand: the next deploy stops on
 the unrecorded change until it is on `main`.

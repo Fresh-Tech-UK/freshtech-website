@@ -25,6 +25,16 @@ the build. The `Static site quality` workflow runs the same steps on every pull 
 and the `Deploy to 20i` workflow runs the quick gate (or the full one for a commit that did
 not come through a passing pull request) before every release. Keep the step lists in sync.
 
+## Where the checks run
+
+All three workflows run on GitHub's own standard runners (`ubuntu-22.04`, `ubuntu-latest`).
+Those are free for a public repository, in the Fresh-Tech-UK organisation as on a personal
+account, and do not draw on the organisation's Actions budget. Do not point them at the
+organisation's self-hosted Mac runners: on a public repository anyone can open a pull request,
+and its code would then run on that Mac. If the repository is ever made private, hosted
+minutes become chargeable and the workflows need a private runner first; the deploy also
+loses its `production` environment rules unless the plan covers them.
+
 ## Astro checks
 
 Run from `prototypes/html-first-slice` with `ASTRO_TELEMETRY_DISABLED=1` set (`export ASTRO_TELEMETRY_DISABLED=1`

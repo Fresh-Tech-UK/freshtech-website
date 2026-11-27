@@ -4,7 +4,9 @@ name: Deploy to 20i
 # than a merged pull request (from a phone if need be). Restored from the
 # October 2026 workflow, which moved to the site owner's Mac only to save
 # Actions minutes while the repository was private; standard runners are free
-# now that it is public.
+# now that it is public, in the Fresh-Tech-UK organisation too. Keep it on
+# GitHub's own runners: a public repository must not use the organisation's
+# self-hosted Mac runners (see DEVELOPMENT.md, "Where the checks run").
 #
 # Gate: a commit merged from a pull request whose head passed "Static site
 # quality" (the full ~20 minute browser suite) gets the quick gate here (unit,
@@ -51,7 +53,7 @@ concurrency:
 jobs:
   deploy:
     # Only main, and only this repository, can publish.
-    if: github.ref == 'refs/heads/main' && github.repository == 'mrapoc/freshtech-website'
+    if: github.ref == 'refs/heads/main' && github.repository == 'Fresh-Tech-UK/freshtech-website'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     environment: production
