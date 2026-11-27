@@ -10,6 +10,7 @@
 //   --commit <sha>      deploy an earlier commit on main (rollback; held until main moves on)
 //   --allow-overwrite   overwrite live files changed outside this deploy (see deploy-20i.mjs)
 //   --quick             skip the ~20 minute browser suite (unit/contract tests and build still run)
+//   --full-upload       back up and upload every file, not only those changed since the last deploy
 //
 // Every run builds in its own clean worktree, never in your working copy, so
 // uncommitted or unmerged local work can never go live. The quality gate is
@@ -133,7 +134,7 @@ try {
     ...process.env,
     DEPLOY_HOST: config.host, DEPLOY_PORT: String(config.port), DEPLOY_USER: config.user, DEPLOY_ROOT: config.root,
     DEPLOY_KEY_FILE: config.keyFile, DEPLOY_KNOWN_HOSTS_FILE: config.knownHostsFile,
-    DEPLOY_ALLOW_OVERWRITE: flag('allow-overwrite') ? 'true' : 'false', RUNNER_TEMP: tmp,
+    DEPLOY_ALLOW_OVERWRITE: flag('allow-overwrite') ? 'true' : 'false', DEPLOY_FULL: flag('full-upload') ? 'true' : 'false', RUNNER_TEMP: tmp,
   };
   const step = (command, extra = [], allowFailure = false) =>
     sh(process.execPath, [join(tools, 'scripts', 'deploy-20i.mjs'), command, ...extra], { env: deployEnv, allowFailure });
@@ -151,7 +152,7 @@ try {
   for (const old of readdirSync(backups).sort().slice(0, -KEEP_BACKUPS)) rmSync(join(backups, old), { recursive: true, force: true });
 
   log('Uploading...');
-  if (step('upload', ['--site', site, '--manifest', manifest], true).status !== 0) {
+  if (step('upload', ['--site', site, '--manifest', manifest, '--backup', rollback], true).status !== 0) {
     restore();
     throw new Error('The upload failed part way; the previous files were restored.');
   }

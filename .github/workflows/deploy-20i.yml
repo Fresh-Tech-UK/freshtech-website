@@ -15,7 +15,9 @@ name: Deploy to 20i
 # gets the full gate first.
 #
 # scripts/deploy-20i.mjs writes over public_html and never deletes (the live
-# email handler and private configuration are never touched). It backs up
+# email handler and private configuration are never touched). It moves only
+# the files changed since the last recorded deploy; a manual run can tick
+# "full upload" to send and re-check every file. It backs up
 # every replaced file first, verifies the changed files on https://fresh-tech.uk,
 # and restores the backup if the upload or verification fails. It stops before
 # uploading if the live site has changes made outside a recorded deploy, unless
@@ -32,6 +34,11 @@ on:
         default: ''
       full_gate:
         description: Run the full browser suite before deploying, even if the pull request already passed it.
+        type: boolean
+        required: false
+        default: false
+      full_upload:
+        description: Back up and upload every file, not only those changed since the last deploy (also re-checks every live file for manual changes).
         type: boolean
         required: false
         default: false
@@ -164,6 +171,7 @@ jobs:
         # Exits 4 without uploading when live files were changed outside a recorded deploy.
         env:
           DEPLOY_ALLOW_OVERWRITE: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_overwrite }}
+          DEPLOY_FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full_upload }}
         run: node scripts/deploy-20i.mjs backup --site "$SITE" --manifest "$MANIFEST" --out "$RUNNER_TEMP/rollback"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.target.outputs.go == 'true'
@@ -175,7 +183,7 @@ jobs:
       - name: Upload over public_html (never deletes)
         id: upload
         if: steps.target.outputs.go == 'true'
-        run: node scripts/deploy-20i.mjs upload --site "$SITE" --manifest "$MANIFEST"
+        run: node scripts/deploy-20i.mjs upload --site "$SITE" --manifest "$MANIFEST" --backup "$RUNNER_TEMP/rollback"
       - name: Record what was deployed, for the manual-change guard
         if: steps.target.outputs.go == 'true'
         env:
