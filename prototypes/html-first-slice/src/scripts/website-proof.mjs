@@ -48,7 +48,7 @@ export function startWebsiteProof({ root = document, runtime = window, fetcher =
       if (feed === 'metrics') {
         // One layout for the homepage panel and the full sections: the call wait
         // leads, then the call answer rate, the ticket time and any ticket rate.
-        const figures = proofFigures(values), periods = proofPeriods(values), method = proofMethod(values);
+        const figures = proofFigures(values), periods = proofPeriods(values), method = proofMethod(values, { closing: cards.dataset.proofCompact === 'true' });
         const signature = JSON.stringify([figures.map(figure => [figure.id, figure.label]), method, periods.length]);
         // Keep the disclosure node, its open state and keyboard focus on refresh
         // while the same figures, labels and definitions are showing.

@@ -100,7 +100,9 @@ try {
       `${label}: figures fit the reserved height (no layout shift)`);
     await page.locator('.proof-method summary').first().click();
     const method = await page.locator('.proof-method').first().innerText();
-    check(proofMethod(parseMetrics(withTicket(definition, extra), FIXTURE_NOW)).every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
+    check(proofMethod(parseMetrics(withTicket(definition, extra), FIXTURE_NOW), { closing: route === '/' }).every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
+    const metricsText = await page.locator('[data-proof-metrics]').first().innerText();
+    check((metricsText.match(/every customer.s experience/g) ?? []).length === 1, `${label}: exactly one "every customer's experience" statement`);
     check(Object.entries(RATE_BASIS).every(([key, rate]) => key === basis || !method.includes(rate.method(wording))), `${label}: no other basis's method`);
     check(typical ? !/\baverage first|The average covers/i.test(method + text) : !/typical/i.test(method + text), `${label}: a median is never called an average`);
     check((await page.locator('.proof-period').first().innerText()).includes('25 August 2026 to 21 September 2026'), `${label}: reporting period kept`);

@@ -57,18 +57,20 @@ test("live v2 nine-key feed: figures and wording pinned", () => {
     ['ticket_rate', 'Support emails answered within one business hour', '66.4%', 'rate', false]]);
   assert.deepEqual(proofMethod(values), [
     'Average wait is measured from joining our support phone queue to one of our team answering, among answered calls only. The answer rate is answered calls out of every call to the support queue, including missed and abandoned calls. Answered means a member of our team picked up; calls that reached voicemail or our out-of-hours assistant are not counted as answered.',
-    'Email figures cover support issues our clients raised by email or our web form, counted in business hours (Monday to Friday, 9am to 5:30pm UK time, excluding bank holidays). The time to the first written reply from a technician. The average covers issues that got a first reply.',
+    'Email figures cover support issues our clients raised by email or our web form, counted in business hours (Monday to Friday, 9am to 5:30pm UK time, excluding bank holidays). The time shown is from the issue arriving to the first written reply from a technician. The average covers issues that got a first reply.',
     'Our own internal tickets and automated system notices (for example, a website reporting its own plugin updates) are not counted, because nobody is waiting on a reply. Billing and sales emails are not counted either.',
     'Unanswered issues count against the one-hour figure.',
     'We work on requests in order of urgency and impact, not simply the order they arrive. Something stopping a whole team from working is picked up ahead of a routine request, so a routine request can wait a little longer.',
     'Each figure covers the last 28 complete days, shown as the reporting period above.',
     'These figures are not a time to fix a problem or every customer’s experience.']);
   assert.deepEqual(proofPeriods(values), ['Reporting period: 25 August 2026 to 21 September 2026 (UK dates).']);
+  // Full sections carry their own closing line, so their method leaves this one out.
+  assert.deepEqual(proofMethod(values, { closing: false }), proofMethod(values).slice(0, -1));
 });
 test('v3 nine-key feed keeps the average wording with its own definition', () => {
   const values = parseMetrics(withTicket(TICKET_DEFINITION_V3), FIXTURE_NOW);
   assert.deepEqual(shown(withTicket(TICKET_DEFINITION_V3)).slice(2), [['Average first reply or call on a support email, in business hours', '66 minutes'], ['Support emails answered within one business hour', '66.4%']]);
-  assert.match(proofMethod(values)[1], /The time to our first reply or phone call to the client\. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not\. The average covers issues that got a first reply or call\./);
+  assert.match(proofMethod(values)[1], /The time shown is from the issue arriving to our first reply or phone call to the client\. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not\. The average covers issues that got a first reply or call\./);
 });
 test('with a median the typical time is the headline, never called an average', () => {
   for (const [definition, label, rateLabel, response] of [

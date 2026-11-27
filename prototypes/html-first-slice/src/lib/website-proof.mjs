@@ -17,14 +17,14 @@ export const TICKET_WORDING = {
     averageLabel: 'Average first reply to a support email, in business hours',
     typicalLabel: 'Typical first reply to a support email, in business hours',
     sameDayLabel: 'Support emails that got a first reply the same working day',
-    counts: 'The time to the first written reply from a technician.',
+    counts: 'The time shown is from the issue arriving to the first written reply from a technician.',
   },
   [TICKET_DEFINITION_V3]: {
     response: 'first reply or call',
     averageLabel: 'Average first reply or call on a support email, in business hours',
     typicalLabel: 'Typical first reply or call on a support email, in business hours',
     sameDayLabel: 'Support emails that got a first reply or call the same working day',
-    counts: 'The time to our first reply or phone call to the client. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not.',
+    counts: 'The time shown is from the issue arriving to our first reply or phone call to the client. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not.',
   },
 };
 // The ticket rate's meaning travels in `service_rate_basis`. A feed without the
@@ -172,12 +172,14 @@ export function proofFigures(values) {
       ...(metric.rate_basis ? [{ id: 'ticket_rate', key: metric.key, label: RATE_BASIS[metric.rate_basis].label(wording), value: formatRate(metric.service_rate_percent), kind: 'rate' }] : [])];
   });
 }
-// "How we measure these figures": only the paragraphs for what is on screen.
-export function proofMethod(values) {
+// "How we measure these figures": only the paragraphs for what is on screen. Full
+// sections already end with their own "not a guarantee, a resolution time or every
+// customer's experience" line, so the closing sentence is for the homepage panel only.
+export function proofMethod(values, { closing = true } = {}) {
   return [...values.flatMap(metric => metric.key === 'call_wait' ? [CALL_WORDING.method] : [
     `${TICKET_SCOPE} ${TICKET_WORDING[metric.definition_id].counts} ${ticketTimeMethod(metric)}`,
     TICKET_EXCLUDED,
-    ...(metric.rate_basis ? [RATE_BASIS[metric.rate_basis].method(TICKET_WORDING[metric.definition_id])] : [])]), METHOD_PRIORITY, METHOD_PERIOD, METHOD_CLOSING];
+    ...(metric.rate_basis ? [RATE_BASIS[metric.rate_basis].method(TICKET_WORDING[metric.definition_id])] : [])]), METHOD_PRIORITY, METHOD_PERIOD, ...(closing ? [METHOD_CLOSING] : [])];
 }
 // One line when both figures cover the same days, one per figure otherwise.
 export function proofPeriods(values) {
