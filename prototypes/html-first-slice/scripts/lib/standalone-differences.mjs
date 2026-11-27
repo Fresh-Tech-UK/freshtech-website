@@ -82,6 +82,14 @@ export const STANDALONE_DIFFERENCES = Object.freeze({
     }),
   },
   '/cookie-policy': { text: [[BASELINE_UPDATED, 'Last updated: 15 June 2026']] },
+  // Keeper added on 27 November 2026 as an optional extra (resold, not part of
+  // every plan), so the hero line no longer says every client has the same stack.
+  '/technology-stack': {
+    text: [
+      ['This is the same stack across every client.', 'This is the same core stack across every client, with optional extras such as Keeper where they fit.'],
+      ['Microsoft 365 Productivity & Identity', 'Keeper Password Management (optional extra) An encrypted business password vault. Teams share logins through permissioned folders, staff can sign in with autofill without being shown the password, and audits flag weak and reused passwords across the business. Why we chose it We run our own business on it. Its zero-knowledge design means Keeper cannot read your passwords, and it makes starters and leavers far simpler to handle. Microsoft 365 Productivity & Identity'],
+    ],
+  },
   // The React breadcrumb repeats "Home" (component Home link plus the page's own
   // Home item); the native breadcrumb shows it once.
   '/support': {
