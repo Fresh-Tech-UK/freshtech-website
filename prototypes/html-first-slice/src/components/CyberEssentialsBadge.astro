@@ -7,9 +7,10 @@
 // with allow-same-origin: the frame stays an opaque origin that cannot reach
 // our page, cookies or storage. Popups only so its link opens a new tab.
 // CSP frame-src allows exactly https://registry.blockmarktech.com.
+// Certificate ID updated for the renewed certificate, 27 Nov 2026.
 // 132 x 132 is Blockmark's minimum size; the fixed size avoids layout shift.
 const { theme = 'transparent', class: className } = Astro.props;
-const src = `https://registry.blockmarktech.com/certificates/d814fc98-ac12-42d2-803a-ba214816fd98/widget/?tooltip_position=bottom&theme=${theme}`;
+const src = `https://registry.blockmarktech.com/certificates/7cbe3974-97df-4649-8585-464864d4ed9d/widget/?tooltip_position=bottom&theme=${theme}`;
 ---
 <iframe
   class:list={['ce-badge', className]}
