@@ -49,13 +49,16 @@ by hand, and no hosting login is needed.
    (under a minute) and "Static site quality" (about 20 minutes, every page in a real browser).
 3. When both are green, and the pull request has the approval the repository rules ask for,
    merge it. Merging is publishing: "Deploy to 20i" builds the merged commit,
-   backs up the files it replaces, uploads, checks the live site and restores the backup if
-   that check fails. The change is live a few minutes after merging.
+   backs up the files it replaces, uploads only the files that changed since the last
+   deploy, checks the live site and restores the backup if that check fails. The change is
+   live a few minutes after merging.
 4. Open the live page and look at it. A red "Deploy to 20i" run means the change is not live:
    read the failed step in the Actions tab, and do not upload to 20i by hand.
 
 To undo a change, revert its pull request on GitHub and merge the revert. "Deploy to 20i"
-can also be run from the Actions tab with an earlier commit on `main`.
+can also be run from the Actions tab with an earlier commit on `main`. Tick "full upload"
+on a manual run to send every file again and re-check every live file for hand-made
+changes (for example after 20i restores the site from its own backup).
 
 The 20i login used by the deploy belongs to GitHub's `production` environment, which only
 `main` can use; nobody needs a copy. Setting it up or replacing it is an admin job:

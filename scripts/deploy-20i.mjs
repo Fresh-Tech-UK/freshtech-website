@@ -3,7 +3,7 @@
 //
 // Usage (driven by scripts/deploy-20i-local.mjs on the deploying Mac):
 //   node scripts/deploy-20i.mjs backup  --site <dir> --manifest <file> --out <rollback-dir>
-//   node scripts/deploy-20i.mjs upload  --site <dir> --manifest <file>
+//   node scripts/deploy-20i.mjs upload  --site <dir> --manifest <file> [--backup <rollback-dir>]
 //   node scripts/deploy-20i.mjs record  --manifest <file> --commit <sha>
 //   node scripts/deploy-20i.mjs verify  --site <dir> --manifest <file> --backup <rollback-dir> --tag <cache-buster>
 //   node scripts/deploy-20i.mjs restore --out <rollback-dir>   (re-uploads the backup)
@@ -23,12 +23,20 @@
 // references an asset that is not there yet. `backup` copies every file about
 // to be replaced first; uploading that copy is the rollback.
 //
+// Only changed files move: `backup` reads the last deploy record first and
+// selects the packaged files whose content differs from what that deploy
+// wrote (every file when there is no record, or when DEPLOY_FULL=true). It
+// lists them in the rollback folder; `upload` and `verify`, given --backup,
+// work on that list alone. The builds are reproducible, so a content change
+// moves a handful of files instead of all of them. The manual-change guard
+// covers the files this deploy replaces; a full run re-checks every file.
+//
 // Connection: DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER, DEPLOY_ROOT (remote
 // public_html path), DEPLOY_KEY_FILE and DEPLOY_KNOWN_HOSTS_FILE. Host keys are
 // pinned (StrictHostKeyChecking=yes); there is no password path.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +49,8 @@ const DEPLOY_STATE_PATH = '.freshtech-deploy/last-deploy.json';
 // Kept beside the backup (excluded from it) so a restore can put the record back.
 const PREVIOUS_STATE = 'previous-deploy-state.json';
 const ROLLBACK_LIST = 'rollback-files.json';
+// Written by `backup` beside the rollback copy: the files this deploy writes.
+const DEPLOY_LIST = 'deploy-files.json';
 const sha256 = body => createHash('sha256').update(body).digest('hex');
 
 const [command, ...rest] = process.argv.slice(2);
@@ -69,6 +79,16 @@ export function publicUrl(path) {
   if (path.endsWith('/index.html')) return `/${path.slice(0, -'/index.html'.length)}`;
   if (path.endsWith('.html')) return null;
   return `/${path}`;
+}
+
+// The packaged files this deploy must write: those whose content differs from
+// what the last recorded deploy wrote. With no usable record, or full set,
+// every file. state is the parsed DEPLOY_STATE_PATH record or null.
+export function changedPaths(paths, manifest, state, full = false) {
+  const recorded = state?.files;
+  if (full || !recorded || typeof recorded !== 'object' || Array.isArray(recorded)) return [...paths];
+  const next = new Map(manifest.files.map(file => [file.path, file.sha256]));
+  return paths.filter(path => recorded[path] !== next.get(path));
 }
 
 // Live files (path -> sha256) that match neither the last recorded automatic
@@ -110,24 +130,26 @@ const localPath = (dir, path) => join(dir, ...path.split('/')).split(sep).join('
 
 async function backup(paths, out, manifest) {
   await mkdir(out, { recursive: true });
-  for (const dir of parents(paths)) await mkdir(join(out, ...dir.split('/')), { recursive: true });
+  // The record of the last deploy decides which files this one needs to write.
+  sftp([`-get "${DEPLOY_STATE_PATH}" "${localPath(out, PREVIOUS_STATE)}"`]);
+  const statePath = join(out, PREVIOUS_STATE);
+  const state = existsSync(statePath) ? JSON.parse(await readFile(statePath, 'utf8')) : null;
+  const full = process.env.DEPLOY_FULL === 'true';
+  const selected = changedPaths(paths, manifest, state, full);
+  await writeFile(join(out, DEPLOY_LIST), `${JSON.stringify(selected, null, 2)}\n`);
+  for (const dir of parents(selected)) await mkdir(join(out, ...dir.split('/')), { recursive: true });
   // "-get" ignores files that do not exist yet: only replaced files are copied.
-  sftp([
-    ...paths.map(path => `-get "{root}/${path}" "${localPath(out, path)}"`),
-    `-get "${DEPLOY_STATE_PATH}" "${localPath(out, PREVIOUS_STATE)}"`,
-  ]);
+  if (selected.length) sftp(selected.map(path => `-get "{root}/${path}" "${localPath(out, path)}"`));
   const saved = [];
   const walk = async dir => { for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     const path = relative(out, full).split(sep).join('/');
-    if (entry.isDirectory()) await walk(full); else if (path !== PREVIOUS_STATE) saved.push(path);
+    if (entry.isDirectory()) await walk(full); else if (path !== PREVIOUS_STATE && path !== DEPLOY_LIST) saved.push(path);
   } };
   await walk(out);
   await writeFile(join(out, ROLLBACK_LIST), `${JSON.stringify(saved.sort(), null, 2)}\n`);
-  console.log(JSON.stringify({ backedUp: saved.length, of: paths.length }));
+  console.log(JSON.stringify({ toDeploy: selected.length, unchanged: paths.length - selected.length, backedUp: saved.length, full: full || !state }));
 
-  const statePath = join(out, PREVIOUS_STATE);
-  const state = existsSync(statePath) ? JSON.parse(await readFile(statePath, 'utf8')) : null;
   const live = Object.fromEntries(await Promise.all(saved.map(async path => [path, sha256(await readFile(join(out, ...path.split('/'))))])));
   const drift = findDrift(live, state, manifest);
   if (!drift.length) return;
@@ -155,7 +177,21 @@ async function record(manifest, commit, paths) {
   console.log(JSON.stringify({ recorded: paths.length, commit }));
 }
 
+// The files `backup` chose for this deploy, checked against the package.
+// Without a backup folder (or an older one with no list) every file.
+export function selectedPaths(paths, backupDir) {
+  if (!backupDir) return paths;
+  const listPath = join(backupDir, DEPLOY_LIST);
+  if (!existsSync(listPath)) return paths;
+  const selected = JSON.parse(readFileSync(listPath, 'utf8'));
+  const known = new Set(paths);
+  if (!Array.isArray(selected)) throw new Error(`${DEPLOY_LIST} is not a list`);
+  for (const path of selected) if (!known.has(path)) throw new Error(`${DEPLOY_LIST} names ${JSON.stringify(path)}, which is not in this package`);
+  return selected;
+}
+
 function upload(paths, site) {
+  if (!paths.length) { console.log(JSON.stringify({ uploaded: 0 })); return; }
   for (const path of paths) if (!existsSync(join(site, ...path.split('/')))) throw new Error(`Missing packaged file ${path}`);
   const ordered = uploadOrder(paths);
   sftp([
@@ -197,7 +233,9 @@ async function verify(manifest, tag, backupDir) {
   for (const path of JSON.parse(await readFile(join(backupDir, ROLLBACK_LIST), 'utf8'))) {
     backupShas[path] = sha256(await readFile(join(backupDir, ...path.split('/'))));
   }
-  const files = verifySelection(manifest.files, backupShas);
+  // Only the files this deploy wrote can have changed; the home page is always checked.
+  const written = new Set(selectedPaths(manifest.files.map(file => file.path), backupDir));
+  const files = verifySelection(manifest.files.filter(file => file.path === 'index.html' || written.has(file.path)), backupShas);
   let index = 0;
   const worker = async () => {
     while (index < files.length) {
@@ -249,7 +287,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const paths = checkedPaths(manifest);
   const site = resolve(option('site') ?? '');
   if (command === 'backup') await backup(paths, resolve(option('out') ?? ''), manifest);
-  else if (command === 'upload') upload(paths, site);
+  else if (command === 'upload') upload(selectedPaths(paths, option('backup') && resolve(option('backup'))), site);
   else if (command === 'record') await record(manifest, option('commit'), paths);
   else await verify(manifest, option('tag') ?? String(Date.now()), resolve(option('backup') ?? ''));
 }

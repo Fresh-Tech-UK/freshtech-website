@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkedPaths, findDrift, publicUrl, uploadOrder, verifySelection } from './deploy-20i.mjs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { changedPaths, checkedPaths, findDrift, publicUrl, selectedPaths, uploadOrder, verifySelection } from './deploy-20i.mjs';
 
 const manifest = files => ({ schemaVersion: 1, mode: 'production', preservedFiles: ['server/api/send-email.php'], files: files.map(path => ({ path })) });
 
@@ -45,4 +48,30 @@ test('verifies the home page and only the files this deploy changed, within the 
   const many = Array.from({ length: 100 }, (_, index) => ({ path: `p${String(index).padStart(3, '0')}/index.html`, sha256: 'x' }));
   const picked = verifySelection([{ path: 'index.html', sha256: 'h' }, ...many], {}, 5).map(file => file.path);
   assert.deepEqual(picked, ['index.html', 'p000/index.html', 'p025/index.html', 'p050/index.html', 'p075/index.html']);
+});
+
+test('moves only the files whose content changed since the last recorded deploy', () => {
+  const manifest = { files: [{ path: 'index.html', sha256: 'h2' }, { path: 'about/index.html', sha256: 'a1' }, { path: '_astro/new.js', sha256: 'n1' }] };
+  const paths = manifest.files.map(file => file.path);
+  const state = { commit: 'abc', files: { 'index.html': 'h1', 'about/index.html': 'a1' } };
+  // Home changed, about unchanged, the new asset was never deployed.
+  assert.deepEqual(changedPaths(paths, manifest, state), ['index.html', '_astro/new.js']);
+  // No record, a damaged record or a full run: every file.
+  assert.deepEqual(changedPaths(paths, manifest, null), paths);
+  assert.deepEqual(changedPaths(paths, manifest, { files: [] }), paths);
+  assert.deepEqual(changedPaths(paths, manifest, state, true), paths);
+  // Nothing changed: nothing to move.
+  assert.deepEqual(changedPaths(paths, manifest, { files: { 'index.html': 'h2', 'about/index.html': 'a1', '_astro/new.js': 'n1' } }), []);
+});
+
+test('uploads the list the backup chose, and refuses one naming files outside the package', () => {
+  const paths = ['index.html', 'about/index.html'];
+  const dir = mkdtempSync(join(tmpdir(), 'deploy-list-'));
+  // An older backup folder with no list (or none given) means every file.
+  assert.deepEqual(selectedPaths(paths, dir), paths);
+  assert.deepEqual(selectedPaths(paths, undefined), paths);
+  writeFileSync(join(dir, 'deploy-files.json'), JSON.stringify(['about/index.html']));
+  assert.deepEqual(selectedPaths(paths, dir), ['about/index.html']);
+  writeFileSync(join(dir, 'deploy-files.json'), JSON.stringify(['private/send-email-config.php']));
+  assert.throws(() => selectedPaths(paths, dir), /not in this package/);
 });
