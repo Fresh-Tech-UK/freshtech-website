@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { metricsFixture, feedbackFixture, unavailableFeedback, FIXTURE_NOW, emptyMetric } from './fixtures/website-proof.mjs';
-import { CALL_WORDING, RATE_BASIS, TICKET_DEFINITION_V2, TICKET_DEFINITION_V3, TICKET_WORDING } from '../src/lib/website-proof.mjs';
+import { CALL_WORDING, RATE_BASIS, TICKET_DEFINITION_V2, TICKET_DEFINITION_V3, TICKET_WORDING, parseMetrics, proofMethod } from '../src/lib/website-proof.mjs';
 import { BLOCKMARK_STUB, isBlockmarkBadge } from './lib/blockmark-stub.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -69,9 +69,10 @@ try {
   const ticketCases = [
     { name: 'v2-four', definition: TICKET_DEFINITION_V2, extra: {}, basis: 'one_business_hour' },
     { name: 'v3-four', definition: TICKET_DEFINITION_V3, extra: {}, basis: 'one_business_hour' },
-    { name: 'v3-sameday', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1800 }, basis: 'same_business_day' },
-    { name: 'v2-three', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: null, value_median_seconds: 1800, service_rate_percent: null }, basis: null },
-    { name: 'v3-three', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: null, value_median_seconds: 1800, service_rate_percent: null }, basis: null },
+    { name: 'v3-sameday', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
+    { name: 'v2-sameday', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
+    { name: 'v2-three', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
+    { name: 'v3-three', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
   ];
   const figureLayout = locator => locator.evaluate(list => {
     const box = list.getBoundingClientRect(), items = [...list.children].map(el => ({ id: el.dataset.proofFigure, label: el.querySelector('dt').textContent,
@@ -87,8 +88,11 @@ try {
     await page.locator('[data-proof-metrics]').first().waitFor({ state: 'visible' });
     const text = (await page.locator('[data-website-proof]').allInnerTexts()).join('\n');
     const layout = await figureLayout(page.locator('.proof-figures').first());
-    const expected = [['call_time', CALL_WORDING.time, '25 seconds'], ['call_rate', CALL_WORDING.rate, '93.7%'], ['ticket_time', TICKET_WORDING[definition].label, '66 minutes'],
-      ...(basis ? [['ticket_rate', RATE_BASIS[basis].label, '66.4%']] : [])];
+    // With a median the typical time (26 minutes) is the headline; without, today's average (66 minutes).
+    const wording = TICKET_WORDING[definition], typical = 'value_median_seconds' in extra;
+    const expected = [['call_time', CALL_WORDING.time, '25 seconds'], ['call_rate', CALL_WORDING.rate, '93.7%'],
+      ['ticket_time', typical ? wording.typicalLabel : wording.averageLabel, typical ? '26 minutes' : '66 minutes'],
+      ...(basis ? [['ticket_rate', RATE_BASIS[basis].label(wording), '66.4%']] : [])];
     check(JSON.stringify(layout.items.map(item => [item.id, item.label, item.value])) === JSON.stringify(expected), `${label}: figures, labels and values in order (${JSON.stringify(layout.items.map(item => item.label))})`);
     check(layout.items.slice(1).every(item => item.size < layout.items[0].size), `${label}: the call wait is the largest figure`);
     check(layout.filled, `${label}: ${expected.length} figures leave no empty cell (${layout.rows} rows)`);
@@ -96,8 +100,9 @@ try {
       `${label}: figures fit the reserved height (no layout shift)`);
     await page.locator('.proof-method summary').first().click();
     const method = await page.locator('.proof-method').first().innerText();
-    check([CALL_WORDING.method, TICKET_WORDING[definition].method, ...(basis ? [RATE_BASIS[basis].method] : [])].every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
-    check(Object.entries(RATE_BASIS).every(([key, wording]) => key === basis || !method.includes(wording.method)), `${label}: no other basis's method`);
+    check(proofMethod(parseMetrics(withTicket(definition, extra), FIXTURE_NOW)).every(part => method.includes(part)), `${label}: method text follows the definition and basis`);
+    check(Object.entries(RATE_BASIS).every(([key, rate]) => key === basis || !method.includes(rate.method(wording))), `${label}: no other basis's method`);
+    check(typical ? !/\baverage first|The average covers/i.test(method + text) : !/typical/i.test(method + text), `${label}: a median is never called an average`);
     check((await page.locator('.proof-period').first().innerText()).includes('25 August 2026 to 21 September 2026'), `${label}: reporting period kept`);
     check(!/resolution time|resolved in|eligible|by a person/i.test(text.replace(/not a guarantee, a resolution time/i, '')), `${label}: never called resolution time; no queue jargon in labels`);
     check(definition === TICKET_DEFINITION_V2 ? !/reply or (phone )?call|linked to the issue/.test(method + text) : !/written reply/.test(method + text), `${label}: no other definition's wording`);
@@ -107,7 +112,7 @@ try {
       const next = definition === TICKET_DEFINITION_V2 ? TICKET_DEFINITION_V3 : TICKET_DEFINITION_V2;
       state.metrics = withTicket(next); await page.clock.runFor(60000); await settle(page);
       const refreshed = await page.locator('[data-proof-metrics]').first().innerText();
-      check(refreshed.includes(TICKET_WORDING[next].label) && !refreshed.includes(TICKET_WORDING[definition].label), `${label}: definition change on refresh swaps the wording`);
+      check(refreshed.includes(TICKET_WORDING[next].averageLabel) && !refreshed.includes(TICKET_WORDING[definition].averageLabel), `${label}: definition change on refresh swaps the wording`);
       state.metrics = withTicket(next, { service_rate_basis: null, value_median_seconds: 1800, service_rate_percent: null }); await page.clock.runFor(60000); await settle(page);
       check(await page.locator('.proof-figures').first().evaluate(el => el.dataset.count === '3' && !el.querySelector('[data-proof-figure="ticket_rate"]')), `${label}: rate withdrawn on refresh leaves three figures`);
     }
