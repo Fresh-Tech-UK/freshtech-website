@@ -72,17 +72,17 @@ test('v3 nine-key feed keeps the average wording with its own definition', () =>
   assert.deepEqual(shown(withTicket(TICKET_DEFINITION_V3)).slice(2), [['Average first reply or call on a support email, in business hours', '66 minutes'], ['Support emails answered within one business hour', '66.4%']]);
   assert.match(proofMethod(values)[1], /The time shown is from the issue arriving to our first reply or phone call to the client\. A phone call with the client that is linked to the ticket counts as the first response; voicemails, unanswered calls and automatic replies do not\. The average covers issues that got a first reply or call\./);
 });
-test('with a median the typical time is the headline, never called an average', () => {
-  for (const [definition, label, rateLabel, response] of [
-    [TICKET_DEFINITION_V3, 'Typical first reply or call on a support email, in business hours', 'Support emails that got a first reply or call the same working day', 'first reply or call'],
-    [TICKET_DEFINITION_V2, 'Typical first reply to a support email, in business hours', 'Support emails that got a first reply the same working day', 'first reply']]) {
+test('with a median the typical time is the headline; a same-day rate is never shown', () => {
+  for (const [definition, label, response] of [
+    [TICKET_DEFINITION_V3, 'Typical first reply or call on a support email, in business hours', 'first reply or call'],
+    [TICKET_DEFINITION_V2, 'Typical first reply to a support email, in business hours', 'first reply']]) {
     const data = withTicket(definition, { service_rate_basis: 'same_business_day', value_median_seconds: 1560, service_rate_percent: 88 });
     const values = parseMetrics(data, FIXTURE_NOW);
-    assert.deepEqual(shown(data).slice(2), [[label, '26 minutes'], [rateLabel, '88%']]);
+    assert.deepEqual(shown(data).slice(2), [[label, '26 minutes']]);
+    assert.equal(values[1].rate_basis, null); assert.equal(values[1].service_rate_percent, null);
     const method = proofMethod(values).join('\n');
     assert.ok(method.includes(`Typical means the median: of the issues that got a ${response}, half got it within this time.`));
-    assert.ok(method.includes(`An issue raised during business hours counts if it got a ${response} by 5:30pm that working day; one raised outside business hours counts if it got one by 5:30pm on the next working day. Unanswered issues count against this figure.`));
-    assert.doesNotMatch(method + proofFigures(values).map(figure => figure.label).join('\n'), /average first|The average covers|one-hour figure/i);
+    assert.doesNotMatch(method + proofFigures(values).map(figure => figure.label).join('\n'), /average first|The average covers|one-hour figure|same working day|88%/i);
   }
   const none = parseMetrics(withTicket(TICKET_DEFINITION_V3, { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }), FIXTURE_NOW);
   assert.deepEqual(proofFigures(none).map(figure => [figure.label, figure.value]).slice(2), [['Typical first reply or call on a support email, in business hours', '26 minutes']]);
@@ -126,7 +126,7 @@ test('an unavailable or stale ticket may carry the pair as nulls', () => {
 test('value_median_seconds becomes the typical time and is not passed on raw', () => {
   const values = parseMetrics(withTicket(TICKET_DEFINITION_V3, { service_rate_basis: 'same_business_day', value_median_seconds: 600 }), FIXTURE_NOW);
   assert.ok(!Object.hasOwn(values[1], 'value_median_seconds')); assert.equal(values[1].typical_seconds, 600);
-  assert.deepEqual(proofFigures(values).map(figure => figure.value), ['25 seconds', '93.7%', '10 minutes', '66.4%']);
+  assert.deepEqual(proofFigures(values).map(figure => figure.value), ['25 seconds', '93.7%', '10 minutes']);
 });
 test('figures follow what is available: calls alone, tickets alone', () => {
   assert.deepEqual(proofFigures(parseMetrics(metricsFixture(), FIXTURE_NOW)).map(figure => figure.id), ['call_time', 'call_rate']);
@@ -142,7 +142,7 @@ test('wording: plain, truthful, no em dashes or resolution claims', () => {
   assert.equal(CALL_WORDING.time, 'Average wait before we answer a support call'); assert.equal(CALL_WORDING.rate, 'Support calls answered by our team');
   assert.match(CALL_WORDING.method, /Answered means a member of our team picked up; calls that reached voicemail or our out-of-hours assistant are not counted as answered\./);
   const texts = [CALL_WORDING.time, CALL_WORDING.rate, CALL_WORDING.method, TICKET_SCOPE, TICKET_EXCLUDED, METHOD_PERIOD, METHOD_PRIORITY,
-    ...Object.values(TICKET_WORDING).flatMap(wording => [wording.averageLabel, wording.typicalLabel, wording.sameDayLabel, wording.counts,
+    ...Object.values(TICKET_WORDING).flatMap(wording => [wording.averageLabel, wording.typicalLabel, wording.counts,
       ...Object.values(RATE_BASIS).flatMap(basis => [basis.label(wording), basis.method(wording)])])];
   for (const text of texts) assert.doesNotMatch(text, /—|resolution|resolved|guarantee|eligible|by a person/i);
   for (const wording of Object.values(TICKET_WORDING)) { assert.doesNotMatch(wording.typicalLabel, /average/i); assert.match(wording.averageLabel, /^Average /); }

@@ -60,7 +60,7 @@ try {
   // ticket rate when the feed publishes one. v2 (first written reply) and v3 (first reply or
   // linked phone call) both render during the changeover, each in its own words. Today's
   // feed has no service_rate_basis: it means one business hour. The pair (basis, median)
-  // brings a same-working-day rate or, with a null basis and rate, three figures.
+  // brings three figures: a same-working-day rate is validated but never shown.
   const withTicket = (definition_id = TICKET_DEFINITION_V2, extra = {}) => {
     const data = metricsFixture(); data.status = 'available';
     data.metrics.ticket_first_response = { ...data.metrics.call_wait, source: 'superops', value_seconds: 3957.1, service_rate_percent: 66.4, definition_id, ...extra };
@@ -69,8 +69,8 @@ try {
   const ticketCases = [
     { name: 'v2-four', definition: TICKET_DEFINITION_V2, extra: {}, basis: 'one_business_hour' },
     { name: 'v3-four', definition: TICKET_DEFINITION_V3, extra: {}, basis: 'one_business_hour' },
-    { name: 'v3-sameday', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
-    { name: 'v2-sameday', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: 'same_business_day' },
+    { name: 'v3-sameday', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: null },
+    { name: 'v2-sameday', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: 'same_business_day', value_median_seconds: 1560 }, basis: null },
     { name: 'v2-three', definition: TICKET_DEFINITION_V2, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
     { name: 'v3-three', definition: TICKET_DEFINITION_V3, extra: { service_rate_basis: null, value_median_seconds: 1560, service_rate_percent: null }, basis: null },
   ];
@@ -104,6 +104,7 @@ try {
     const metricsText = await page.locator('[data-proof-metrics]').first().innerText();
     check((metricsText.match(/every customer.s experience/g) ?? []).length === 1, `${label}: exactly one "every customer's experience" statement`);
     check(Object.entries(RATE_BASIS).every(([key, rate]) => key === basis || !method.includes(rate.method(wording))), `${label}: no other basis's method`);
+    check(!/same working day|by 5:30pm/i.test(method + text), `${label}: no same-day rate or its method`);
     check(typical ? !/\baverage first|The average covers/i.test(method + text) : !/typical/i.test(method + text), `${label}: a median is never called an average`);
     check((await page.locator('.proof-period').first().innerText()).includes('25 August 2026 to 21 September 2026'), `${label}: reporting period kept`);
     check(!/resolution time|resolved in|eligible|by a person/i.test(text.replace(/not a guarantee, a resolution time/i, '')), `${label}: never called resolution time; no queue jargon in labels`);
